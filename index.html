@@ -1089,7 +1089,8 @@
     if(isLocal()) return 'Local only';
     if(syncing) return 'Syncing\u2026';
     if(!navigator.onLine) return 'Offline' + (pendingCount ? ' \u00B7 ' + pendingCount + ' waiting' : '');
-    if(syncErr) return 'Sync failed' + (pendingCount ? ' \u00B7 ' + pendingCount + ' waiting' : '');
+    if(syncErr && pendingCount) return 'Will retry \u00B7 ' + pendingCount + ' waiting';
+    if(syncErr && !lastSyncAt) return 'Sync failed';
     if(pendingCount) return pendingCount + ' waiting';
     return lastSyncAt ? 'Synced ' + new Date(lastSyncAt).toLocaleTimeString('en-IN', {hour:'numeric', minute:'2-digit'}) : 'Not synced yet';
   }
@@ -1097,9 +1098,9 @@
   function refreshPending(){ return oPending().then(a => { pendingCount = a.length; setPill(); }); }
   const toWire = o => ({id:o.id, no:o.no, createdAt:o.createdAt, retailer:o.retailer, notes:o.notes || '', showAmt:o.showAmt !== false, status:o.status,
     rev:o.rev, sentAt:o.sentAt || 0, lines:o.lines.map(l => ({item:l.item, qty:num(l.qty), price:num(l.price)}))});
-  async function api(url, body){
+  async function apiOnce(url, body){
     const ctl = 'AbortController' in window ? new AbortController() : null;
-    const tm = setTimeout(() => { if(ctl) ctl.abort(); }, 30000);
+    const tm = setTimeout(() => { if(ctl) ctl.abort(); }, 25000);
     try {
       const r = await fetch(url, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(body), signal:ctl ? ctl.signal : undefined});
       const t = await r.text();
@@ -1107,8 +1108,16 @@
     } catch(e){ return {ok:false, error:'network'}; }
     finally { clearTimeout(tm); }
   }
+  // Google's script sometimes fails once when it wakes up. Uploads carry an order ID, so repeating a request is safe.
+  async function api(url, body){
+    const r = await apiOnce(url, body);
+    if(r.ok || (r.error !== 'network' && r.error !== 'bad_reply')) return r;
+    await new Promise(res => setTimeout(res, 1500));
+    return apiOnce(url, body);
+  }
   async function applyServer(res, sent, code){
     me = {code, user:res.user, perms:res.perms}; set('ord:me', me);
+    const changed = !!(res.lists || (res.accepted && res.accepted.length) || (res.rejected && res.rejected.length) || (res.orders && res.orders.length));
     if(res.lists){
       master = {v:res.lists.v, at:Date.now(), retailers:res.lists.retailers.map(r => r.name), items:res.lists.items};
       set('ord:master2', master); rebuild();
@@ -1136,11 +1145,19 @@
       if(so.by && so.by.short === curUser().short) bumpSeq(so.no, so.by.short);
     }
     set('ord:cursor', res.cursor || 0);
+    return changed;
   }
   let timing = get('ord:timing', null);          // {at, total, server}: shown in Settings so slow connections can be diagnosed
   function noteTiming(t0, res){
     timing = {at:Date.now(), total:Math.round(performance.now() - t0), server:typeof res.ms === 'number' ? res.ms : null};
     set('ord:timing', timing);
+  }
+  const SYNC_STALE = 5 * 60000, FULL_EVERY = 15 * 60000;      // resume check, and how often a full (not quick) sync is forced
+  let lastFullAt = Number(get('ord:lastfull', 0)) || 0, syncAgain = false, retryStep = 0, retryTimer = null;
+  function scheduleRetry(){
+    clearTimeout(retryTimer);
+    const delays = [8000, 30000, 90000, 300000], d = delays[Math.min(retryStep++, delays.length - 1)];
+    retryTimer = setTimeout(() => { if(document.visibilityState === 'visible') syncNow({}); }, d);
   }
   async function syncNow(opts){
     opts = opts || {};
@@ -1149,30 +1166,41 @@
     const code = opts.code || (me && me.code);
     if(!code) return {ok:false, error:'auth'};
     if(!navigator.onLine){ setPill(); if(opts.manual) toast('You are offline. Orders will upload when you are back online.'); return {ok:false, error:'network'}; }
-    if(syncing) return {ok:false, error:'busy_local'};
-    syncing = true; setPill();
-    let result = {ok:true};
+    if(syncing){ syncAgain = true; return {ok:false, error:'busy_local'}; }   // something new arrived mid-sync: run once more afterwards
+    syncing = true; syncAgain = false; setPill();
+    let result = {ok:true}, changed = false;
     try {
       for(let i = 0; i < 6; i++){
         const pending = (await oPending()).slice(0, 25);
+        const cursor = Number(get('ord:cursor', 0)) || 0;
+        // quick check: nothing to upload and a recent full sync -> the server only says "nothing changed"
+        const quick = i === 0 && !opts.manual && !pending.length && cursor > 0 && lastFullAt && (Date.now() - lastFullAt) < FULL_EVERY;
         const t0 = performance.now();
-        const res = await api(url, {a:'sync', code, cursor:Number(get('ord:cursor', 0)) || 0, lv:master.v || '', orders:pending.map(toWire)});
+        const res = await api(url, {a:'sync', code, cursor, lv:master.v || '', q:quick ? 1 : 0, orders:pending.map(toWire)});
         if(res.ok) noteTiming(t0, res);
         if(!res.ok){
           if(res.error === 'auth' && me && me.code){ me = null; set('ord:me', null); applyGate(); }
           result = res; break;
         }
-        await applyServer(res, pending, code);
+        if(res.unchanged){ me = {code, user:res.user, perms:res.perms}; set('ord:me', me); break; }
+        if(await applyServer(res, pending, code)) changed = true;
+        if(!quick){ lastFullAt = Date.now(); set('ord:lastfull', lastFullAt); }
         if(!res.more && pending.length < 25) break;
       }
-      if(result.ok){ lastSyncAt = Date.now(); set('ord:lastsync', lastSyncAt); syncErr = ''; if(opts.manual) toast('Synced'); }
+      if(result.ok){ lastSyncAt = Date.now(); set('ord:lastsync', lastSyncAt); syncErr = ''; retryStep = 0; clearTimeout(retryTimer); if(opts.manual) toast('Synced'); }
       else { syncErr = result.error || 'failed'; if(opts.manual && result.error !== 'auth') toast('Could not sync (' + syncErr + '). Your orders are safe on this phone.'); }
     } catch(e){ result = {ok:false, error:'client'}; syncErr = 'client'; }
     syncing = false;
     await refreshPending();
-    if(view === 'book') renderBook();
-    if(view === 'lists') renderLists();
+    if(!result.ok && result.error !== 'auth' && pendingCount) scheduleRetry();       // keep trying quietly while orders are waiting
+    if(changed){ if(view === 'book') renderBook(); if(view === 'lists') renderLists(); }
+    if(syncAgain){ syncAgain = false; setTimeout(() => syncNow({}), 300); }
     return result;
+  }
+  // when the app is reopened or the phone reconnects: only sync if something is waiting or the data is a few minutes old
+  function maybeSync(){
+    if(isLocal() || !me) return;
+    if(pendingCount > 0 || Date.now() - lastSyncAt > SYNC_STALE) syncNow({});
   }
   function scheduleSync(){ clearTimeout(syncTimer); if(!isLocal() && me) syncTimer = setTimeout(() => syncNow({}), 700); }
 
@@ -1334,10 +1362,10 @@
   if(navigator.storage && navigator.storage.persist){ navigator.storage.persist().catch(() => {}); }
 
   // sync when the app comes back, when the phone is online again, and every couple of minutes while it is open
-  document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') scheduleSync(); });
-  window.addEventListener('online', () => { setPill(); scheduleSync(); });
+  document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') maybeSync(); });
+  window.addEventListener('online', () => { setPill(); maybeSync(); });
   window.addEventListener('offline', setPill);
-  setInterval(() => { if(document.visibilityState === 'visible' && !isLocal() && me && view !== 'slip') syncNow({}); }, 120000);
+  setInterval(() => { if(document.visibilityState === 'visible' && view !== 'slip') maybeSync(); }, 5 * 60000);
   window.addEventListener('pagehide', () => { if(W && W.isNew) persistDraft(); });
 
   // ======== start ========
