@@ -393,6 +393,7 @@
         <input id="backendUrl" inputmode="url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off"></div>
       <div class="actions"><button type="button" id="backendTest">Test</button><button type="button" class="primary" id="backendSave">Save</button></div>
       <p class="hint" id="backendMsg"></p>
+      <p class="hint" id="timing"></p>
     </details>
   </section>
 
@@ -1136,6 +1137,11 @@
     }
     set('ord:cursor', res.cursor || 0);
   }
+  let timing = get('ord:timing', null);          // {at, total, server}: shown in Settings so slow connections can be diagnosed
+  function noteTiming(t0, res){
+    timing = {at:Date.now(), total:Math.round(performance.now() - t0), server:typeof res.ms === 'number' ? res.ms : null};
+    set('ord:timing', timing);
+  }
   async function syncNow(opts){
     opts = opts || {};
     const url = backendUrl();
@@ -1149,7 +1155,9 @@
     try {
       for(let i = 0; i < 6; i++){
         const pending = (await oPending()).slice(0, 25);
+        const t0 = performance.now();
         const res = await api(url, {a:'sync', code, cursor:Number(get('ord:cursor', 0)) || 0, lv:master.v || '', orders:pending.map(toWire)});
+        if(res.ok) noteTiming(t0, res);
         if(!res.ok){
           if(res.error === 'auth' && me && me.code){ me = null; set('ord:me', null); applyGate(); }
           result = res; break;
@@ -1176,11 +1184,16 @@
     const code = $('loginCode').value.trim();
     if(!code) return;
     $('loginBtn').disabled = true; $('loginBtn').textContent = 'Checking\u2026'; loginErr('');
-    const r = await syncNow({code});
+    // the login call only checks the code, so it is quick; lists and orders download afterwards in the background
+    const t0 = performance.now();
+    const r = isLocal() ? {ok:false, error:'local'} : await api(backendUrl(), {a:'login', code});
     $('loginBtn').disabled = false; $('loginBtn').textContent = 'Continue';
     if(r && r.ok){
+      noteTiming(t0, r);
+      me = {code, user:r.user, perms:r.perms}; set('ord:me', me);
       $('loginCode').value = ''; applyGate(); rebuild(); await refreshPending();
       showView('book'); toast('Welcome, ' + curUser().name);
+      syncNow({});
     } else {
       loginErr({auth:'That code is not valid. Check it and try again.', network:'Could not connect. Check your internet and try again.',
         bad_reply:'The backend address looks wrong, or it is not deployed for "Anyone".', busy:'The server is busy. Please try again.'}[r && r.error] || 'Something went wrong. Please try again.');
@@ -1202,6 +1215,7 @@
     $('groupLink').value = String(get('ord:group', '') || '');
     $('backendUrl').value = String(get('ord:backend', '') || '');
     $('backendMsg').textContent = local ? 'No backend address set.' : 'Using: ' + backendUrl().slice(0, 48) + '\u2026';
+    $('timing').textContent = timing ? 'Last check ' + fmtDT(timing.at) + ': ' + (timing.total / 1000).toFixed(1) + ' s in total' + (timing.server != null ? ', of which ' + (timing.server / 1000).toFixed(1) + ' s inside the script.' : '.') : 'No timing yet.';
   }
   const updateGroupBtn = () => { $('groupBtn').hidden = !/^https:\/\/chat\.whatsapp\.com\//i.test(String(get('ord:group', '') || '').trim()); };
   async function testBackend(){
