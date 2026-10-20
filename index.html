@@ -1,1 +1,1343 @@
-Hi
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Order Book</title>
+<meta name="theme-color" content="#16233B">
+<script src="config.js"></script>
+<script>
+  // Lock the page until a valid access code has been entered on this phone (only when a backend is set up).
+  try {
+    var __url = (localStorage.getItem('ord:backend') ? JSON.parse(localStorage.getItem('ord:backend')) : '') || (window.APP_CONFIG && window.APP_CONFIG.SCRIPT_URL) || '';
+    var __me = JSON.parse(localStorage.getItem('ord:me') || 'null');
+    if(String(__url).trim() && !(__me && __me.code)) document.documentElement.className = 'gate';
+  } catch(e){}
+</script>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Orders">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#EEF1F5; --paper:#FFFFFF; --ink:#16233B; --muted:#5E6B80; --line:#D8DFE8; --rule:#C9D2DE;
+    --accent:#16233B; --send:#128C4A; --send-d:#0E6F3B; --bubble:#D8F1CB; --warn:#B4231A; --tag:#FFF1CC; --tag-ink:#6B4A00;
+    --radius:12px; --bar:68px; --safe-b:env(safe-area-inset-bottom,0px); --safe-t:env(safe-area-inset-top,0px);
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 "Schibsted Grotesk",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  body.noscroll{overflow:hidden}
+  h2{font-size:1.02rem;margin:0}
+  .muted{color:var(--muted);font-size:.88rem}
+  .hint{color:var(--muted);font-size:.85rem;margin:8px 0 0}
+  .num{font-variant-numeric:tabular-nums}
+
+  /* app bar */
+  .appbar{position:sticky;top:0;z-index:5;background:var(--accent);color:#fff;padding:calc(10px + var(--safe-t)) 16px 10px}
+  .appbar .inner{width:100%;max-width:680px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .appbar h1{font-size:1.1rem;margin:0;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .appbar .left{display:flex;align-items:center;gap:6px;min-width:0}
+  .menubtn{background:none;border:0;color:#fff;width:44px;min-height:44px;padding:0;margin-left:-8px;display:flex;align-items:center;justify-content:center;border-radius:10px}
+  .menubtn:hover{background:rgba(255,255,255,.14)}
+  .menubtn svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round}
+  .pill{background:rgba(255,255,255,.14);color:#fff;border:0;border-radius:999px;min-height:34px;padding:0 12px;font-size:.8rem;white-space:nowrap}
+  .pill:hover{background:rgba(255,255,255,.24)}
+
+  /* layout */
+  .view{max-width:680px;margin:0 auto;padding:12px 16px calc(24px + var(--safe-b));display:grid;gap:12px}
+  body.with-bar .view{padding-bottom:calc(var(--bar) + var(--safe-b) + 24px)}
+  .card{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:14px}
+  .cardhead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:10px}
+  label{display:block;font-weight:500;font-size:.9rem;margin-bottom:4px}
+  label small{font-weight:400;color:var(--muted)}
+  input,textarea,select{width:100%;font:inherit;color:inherit;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 11px;min-height:46px}
+  textarea{min-height:76px;resize:vertical}
+  input:disabled,textarea:disabled{background:#F4F6F9;color:var(--ink);opacity:1}
+  input:focus,textarea:focus,select:focus,button:focus-visible,summary:focus-visible{outline:3px solid #7FA6E8;outline-offset:1px}
+  .field+.field{margin-top:12px}
+  button{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--line);background:#fff;color:var(--ink);min-height:46px;padding:0 14px}
+  button:hover{background:#F3F6F9}
+  button:disabled{opacity:.5;cursor:default}
+  .primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .primary:hover{background:#0E1830}
+  .send{background:var(--send);border-color:var(--send);color:#fff;font-weight:700}
+  .send:hover{background:var(--send-d)}
+  .danger{color:var(--warn);border-color:#E7B9B5}
+  .icon{padding:0;width:40px;min-height:40px;color:var(--muted);font-size:1.3rem;border:0;background:none}
+  .icon:hover{color:var(--warn);background:none}
+  .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  .check{display:flex;gap:10px;align-items:center;margin-top:12px;font-size:.95rem}
+  .check input{width:20px;height:20px;min-height:0}
+  .check label{margin:0;font-weight:400}
+  .tag{display:inline-block;background:var(--tag);color:var(--tag-ink);border-radius:6px;font-size:.72rem;font-weight:700;padding:1px 6px;vertical-align:middle;white-space:nowrap}
+  .warn{color:var(--warn);font-size:.88rem;margin:0}
+  .empty{color:var(--muted);text-align:center;margin:10px 0;font-size:.95rem}
+  .badge{display:inline-block;border-radius:6px;font-size:.72rem;font-weight:700;padding:2px 7px;background:#E3E8EF;color:#3B4A63;vertical-align:middle;white-space:nowrap}
+  .st-Sent{background:#D8F1CB;color:#14552E}
+  .st-Edited{background:var(--tag);color:var(--tag-ink)}
+  .st-Cancelled{background:#F8DAD7;color:#8C1D15}
+  .st-Confirmed,.st-Dispatched,.st-Delivered{background:#DCE8FB;color:#173F7A}
+
+  /* order book */
+  .seg{display:flex;background:#E3E8EF;border-radius:10px;padding:3px;gap:3px}
+  .seg button{flex:1;border:0;background:none;min-height:38px;border-radius:8px;font-weight:500;color:var(--muted);padding:0 6px}
+  .seg button.on{background:#fff;color:var(--ink);font-weight:700;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+  .filters{display:grid;gap:8px}
+  .summary{display:flex;justify-content:space-between;color:var(--muted);font-size:.9rem;padding:0 2px}
+  .orow{display:grid;grid-template-columns:1fr auto;gap:2px 10px;width:100%;text-align:left;background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;margin-bottom:8px;min-height:0}
+  .orow:hover{background:#F8FAFC}
+  .o1{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .o1 b{font-size:1.02rem}
+  .o2{grid-column:1;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .o3{grid-column:1;color:var(--muted);font-size:.85rem}
+  .oamt{grid-column:2;grid-row:1/4;align-self:center;text-align:right;font-weight:700}
+  .oamt .sy{display:block;font-weight:400;font-size:.78rem;color:var(--muted)}
+  .oamt.cx{text-decoration:line-through;color:var(--muted)}
+  .draft{border-style:dashed}
+
+  /* order slip */
+  .back{background:none;border:0;color:var(--accent);font-weight:700;min-height:40px;padding:0 4px;justify-self:start}
+  .slip{background:var(--paper);border:1px solid var(--rule);border-radius:var(--radius);box-shadow:0 1px 3px rgba(22,35,59,.08)}
+  .sliphead{padding:14px 14px 10px;border-bottom:2px solid var(--ink)}
+  .sliptitle{text-align:center;font-weight:700;letter-spacing:.14em;font-size:.82rem;margin-bottom:10px}
+  .slipmeta{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px}
+  .slipmeta .k{display:block;color:var(--muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.05em}
+  .slipmeta b{font-size:1rem}
+  .slipsec{padding:12px 14px;border-bottom:1px dashed var(--rule)}
+  .slipsec:last-child{border-bottom:0}
+  .tawrap{position:relative}
+  .talist{position:absolute;left:0;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid var(--rule);border-radius:10px;box-shadow:0 8px 24px rgba(22,35,59,.18);z-index:20;max-height:300px;overflow:auto}
+  .taopt{display:flex;width:100%;justify-content:space-between;gap:8px;text-align:left;border:0;border-bottom:1px solid var(--line);border-radius:0;background:none;min-height:46px;padding:8px 12px}
+  .taopt:last-child{border-bottom:0}
+  .taopt:hover,.taopt.act{background:#F0F4FA}
+  .taopt .m{color:var(--muted);font-size:.88rem;white-space:nowrap}
+  .taopt.new{color:var(--accent);font-weight:700}
+  .sliprows{margin:0 -4px}
+  .srow{display:grid;grid-template-columns:26px 1fr 40px;gap:0 6px;align-items:start;padding:8px 4px;border-bottom:1px solid var(--line)}
+  .sr{color:var(--muted);padding-top:8px;text-align:right}
+  .sitem{font-weight:500;word-break:break-word;padding-top:8px}
+  .srow .icon{width:40px;min-height:36px}
+  .snums{grid-column:2/4;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px}
+  .stepper{display:flex;align-items:center}
+  .stepper button{width:40px;min-height:44px;padding:0;font-size:1.3rem}
+  .stepper button:first-child{border-radius:10px 0 0 10px}
+  .stepper button:last-child{border-radius:0 10px 10px 0}
+  .stepper input{width:58px;text-align:center;border-radius:0;border-left:0;border-right:0;padding:8px 2px;-moz-appearance:textfield}
+  .times{color:var(--muted)}
+  .pr{display:flex;align-items:center;gap:4px;margin:0;font-weight:400}
+  .pr input{width:92px;text-align:right;padding:8px}
+  input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  .amt{margin-left:auto;font-weight:700}
+  .addrow{margin-top:10px}
+  .totals{display:grid;gap:4px}
+  .totals .r{display:flex;justify-content:space-between}
+  .totals .big{font-size:1.25rem;font-weight:700;border-top:2px solid var(--ink);padding-top:6px;margin-top:4px}
+  .notice{background:#F4F6F9;border-radius:10px;padding:10px 12px;font-size:.9rem;color:var(--muted)}
+  .bubble-wrap{background:#E5DDD5;border-radius:var(--radius);padding:14px;border:1px solid var(--line);margin-top:10px}
+  .bubble{background:var(--bubble);border-radius:10px 10px 2px 10px;padding:10px 12px;white-space:pre-wrap;word-break:break-word;font-size:.95rem;box-shadow:0 1px 1px rgba(0,0,0,.12)}
+
+  /* bars */
+  .bar{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--paper);border-top:1px solid var(--line);padding:10px 16px calc(10px + var(--safe-b))}
+  .bar .inner{max-width:680px;margin:0 auto;display:flex;gap:8px}
+  .bar .send,.bar .primary{flex:1}
+  .bar .inner button{min-height:48px}
+
+  /* lists */
+  .lrow{display:flex;align-items:center;border-bottom:1px solid var(--line)}
+  .lrow:last-child{border-bottom:0}
+  .lrow .main{flex:1;min-width:0;text-align:left;border:0;border-radius:0;background:none;min-height:50px;padding:8px 4px;display:flex;gap:8px;align-items:center;justify-content:space-between}
+  .lrow .main:hover{background:#F3F6F9}
+  .lrow .nm{overflow:hidden;text-overflow:ellipsis}
+  .lrow .meta{color:var(--muted);font-size:.9rem;white-space:nowrap}
+  .syncline{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+  details{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}
+  summary{cursor:pointer;font-weight:700;min-height:32px}
+
+  /* drawer, dialogs */
+  .backdrop{position:absolute;inset:0;background:rgba(22,35,59,.55)}
+  .drawerwrap{position:fixed;inset:0;z-index:35}
+  .drawer{position:absolute;top:0;bottom:0;left:0;width:min(290px,84vw);background:var(--paper);display:flex;flex-direction:column;padding:calc(12px + var(--safe-t)) 12px calc(12px + var(--safe-b));box-shadow:2px 0 16px rgba(0,0,0,.25);transform:translateX(-100%);transition:transform .2s}
+  .drawerwrap.open .drawer{transform:none}
+  .drawerhead{display:flex;align-items:center;justify-content:space-between;padding:4px 6px 14px;border-bottom:1px solid var(--line);margin-bottom:8px}
+  .drawerhead strong{font-size:1.05rem}
+  .drawer .item{display:flex;align-items:center;gap:14px;width:100%;text-align:left;border:0;background:none;min-height:52px;padding:0 12px;border-radius:10px;font-size:1.02rem;color:var(--ink)}
+  .drawer .item:hover{background:#F3F6F9}
+  .drawer .item svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;color:var(--muted)}
+  .drawer .item.on{background:#E8EDF5;font-weight:700}
+  .drawer .item.on svg{color:var(--accent)}
+  .drawer .foot{margin-top:auto;padding:10px 12px 0;border-top:1px solid var(--line)}
+  .overlay{position:fixed;inset:0;background:rgba(22,35,59,.55);display:flex;align-items:flex-end;justify-content:center;z-index:40;padding:12px}
+  .dialog{background:#fff;border-radius:var(--radius);padding:16px;width:100%;max-width:520px;max-height:90vh;overflow:auto}
+  .toast{position:fixed;left:50%;bottom:calc(24px + var(--safe-b));transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:8px;font-size:.92rem;opacity:0;pointer-events:none;transition:opacity .2s;z-index:50;max-width:90vw;text-align:center}
+  body.with-bar .toast{bottom:calc(var(--bar) + var(--safe-b) + 14px)}
+  .toast.on{opacity:1}
+  .installbox{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+  .installbox p{margin:0;font-size:.92rem;flex:1;min-width:200px}
+
+  /* login */
+  .lock{display:none;position:fixed;inset:0;z-index:100;background:var(--bg);align-items:center;justify-content:center;padding:16px;overflow:auto}
+  html.gate .lock{display:flex}
+  html.gate .appbar, html.gate main, html.gate .bar, html.gate .drawerwrap, html.gate .overlay, html.gate .toast{display:none!important}
+  .lockcard{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:24px 20px;width:100%;max-width:380px;text-align:center}
+  .lockcard img{width:72px;height:72px;border-radius:16px}
+  .lockcard h1{font-size:1.25rem;margin:12px 0 4px}
+  .lockcard p{margin:0 0 12px;color:var(--muted);font-size:.95rem}
+  .lockcard label{text-align:left}
+  .lockcard .check{justify-content:flex-start}
+  .lockcard .primary{width:100%;margin-top:14px}
+  .lockcard .warn{text-align:left;margin-top:10px}
+  @media(prefers-reduced-motion:reduce){.toast,.drawer{transition:none}}
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div class="lock" id="login" role="dialog" aria-modal="true" aria-labelledby="loginT">
+  <form class="lockcard" id="loginForm">
+    <img src="icon-192.png" alt="">
+    <h1 id="loginT">Order Book</h1>
+    <p>Enter your access code to continue.</p>
+    <label for="loginCode">Access code</label>
+    <input id="loginCode" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go">
+    <div class="check"><input type="checkbox" id="loginShow"><label for="loginShow">Show code</label></div>
+    <p class="warn" id="loginErr" role="alert" hidden></p>
+    <button type="submit" class="primary" id="loginBtn">Continue</button>
+    <p class="hint" style="margin-top:12px">Ask the owner for your personal code. You only need to enter it once on this phone.</p>
+  </form>
+</div>
+
+<header class="appbar">
+  <div class="inner">
+    <div class="left">
+      <button type="button" class="menubtn" id="menuBtn" aria-label="Open menu" aria-expanded="false" aria-controls="drawer">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <h1 id="viewTitle">Order Book</h1>
+    </div>
+    <button type="button" class="pill" id="syncPill" aria-label="Sync status. Tap to sync now.">Local only</button>
+  </div>
+</header>
+
+<!-- ============ ORDER BOOK ============ -->
+<main class="view" id="v-book">
+  <div class="card installbox" id="installBox" hidden>
+    <p id="installText">Install this app on your home screen to open it like any other app.</p>
+    <button type="button" class="primary" id="installBtn" hidden>Install app</button>
+    <button type="button" id="installHide">Not now</button>
+  </div>
+  <p class="warn" id="storageWarn" hidden>Saving is not available here, so orders will be lost when you close the page. Open the app from its web address or install it.</p>
+
+  <section class="card draft" id="draftCard" hidden>
+    <div class="cardhead"><h2>Unsaved order</h2><span class="muted" id="draftNo"></span></div>
+    <div id="draftText" class="muted"></div>
+    <div class="actions"><button type="button" class="primary" id="draftResume">Continue</button><button type="button" id="draftDiscard">Discard</button></div>
+  </section>
+
+  <section class="card filters">
+    <div class="seg" id="segPeriod" role="group" aria-label="Period">
+      <button type="button" data-p="today">Today</button>
+      <button type="button" data-p="7">7 days</button>
+      <button type="button" data-p="30">30 days</button>
+      <button type="button" data-p="all">All</button>
+    </div>
+    <div class="seg" id="segScope" role="group" aria-label="Whose orders">
+      <button type="button" data-s="mine">My orders</button>
+      <button type="button" data-s="all">Everyone</button>
+    </div>
+    <input id="bookSearch" type="search" placeholder="Search orders" autocomplete="off" aria-label="Search orders">
+  </section>
+
+  <div class="summary"><span id="sumCount"></span><span id="sumAmt" class="num"></span></div>
+  <div id="bookList"></div>
+  <button type="button" id="bookMore" hidden>Show more</button>
+</main>
+
+<!-- ============ ORDER SLIP ============ -->
+<main class="view" id="v-slip" hidden>
+  <button type="button" class="back" id="backBtn">&lsaquo; Order Book</button>
+
+  <section class="slip" aria-label="Order slip">
+    <div class="sliphead">
+      <div class="sliptitle">ORDER SLIP</div>
+      <div class="slipmeta">
+        <div><span class="k">Order No</span><b id="sNo" class="num"></b></div>
+        <div><span class="k">Date</span><b id="sDate"></b></div>
+        <div><span class="k">Salesman</span><b id="sBy"></b></div>
+        <div><span class="k">Status</span><span class="badge" id="sStatus"></span></div>
+      </div>
+    </div>
+
+    <div class="slipsec" id="sNotice" hidden><div class="notice" id="sNoticeText"></div></div>
+
+    <div class="slipsec">
+      <label for="sRet">Retailer</label>
+      <div class="tawrap">
+        <input id="sRet" autocomplete="off" autocapitalize="words" placeholder="Search or type retailer name" enterkeyhint="next">
+        <div class="talist" id="sRetList" hidden></div>
+      </div>
+      <div style="margin-top:6px"><span class="tag" id="sRetNew" hidden>New retailer</span></div>
+    </div>
+
+    <div class="slipsec">
+      <label>Items</label>
+      <div class="sliprows" id="sLines"></div>
+      <p class="empty" id="sEmpty">No items yet. Type an item name below.</p>
+      <div class="tawrap addrow" id="sAddWrap">
+        <input id="sAdd" autocomplete="off" autocapitalize="off" placeholder="+ Type item name to add" enterkeyhint="done">
+        <div class="talist" id="sAddList" hidden></div>
+      </div>
+    </div>
+
+    <div class="slipsec totals num">
+      <div class="r"><span>Items</span><span id="tItems">0</span></div>
+      <div class="r"><span>Total quantity</span><span id="tQty">0</span></div>
+      <div class="r big"><span>Total amount</span><span id="tAmt">&#8377;0</span></div>
+      <div class="muted" id="tNote" hidden></div>
+    </div>
+
+    <div class="slipsec">
+      <label for="sNotes">Remarks</label>
+      <textarea id="sNotes" placeholder="e.g. Deliver by Friday. Payment on delivery."></textarea>
+      <div class="check"><input type="checkbox" id="sShowAmt"><label for="sShowAmt">Show rates and amounts in the WhatsApp message</label></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <details style="border-top:0;padding-top:0;margin-top:0">
+      <summary>Preview WhatsApp message</summary>
+      <div class="bubble-wrap"><div class="bubble" id="preview"></div></div>
+    </details>
+    <div class="actions">
+      <button type="button" id="copyBtn">Copy message</button>
+      <button type="button" id="groupBtn" hidden>Copy &amp; open group</button>
+      <button type="button" id="reuseBtn" hidden>Reuse as new order</button>
+      <button type="button" class="danger" id="cancelBtn" hidden>Cancel order</button>
+    </div>
+    <p class="hint" id="slipHint">WhatsApp opens with the message ready. Choose your group there and press send.</p>
+  </section>
+</main>
+
+<!-- ============ LISTS ============ -->
+<main class="view" id="v-lists" hidden>
+  <section class="card">
+    <div class="syncline">
+      <div><h2>Retailers &amp; items</h2><div class="muted" id="listStatus"></div></div>
+      <button type="button" id="refreshBtn">Refresh</button>
+    </div>
+    <p class="hint">These lists are managed by the owner in the Google Sheet. Names you type on an order stay on this phone until the owner adds them.</p>
+  </section>
+  <section class="card">
+    <div class="seg" role="group" aria-label="List">
+      <button type="button" class="on" id="segR">Retailers</button>
+      <button type="button" id="segI">Items</button>
+    </div>
+    <div class="field"><input id="listSearch" type="search" placeholder="Search" autocomplete="off" aria-label="Search list"></div>
+    <div id="listBox" style="margin-top:6px"></div>
+  </section>
+  <section class="card">
+    <details style="border-top:0;padding-top:0;margin-top:0">
+      <summary>Add many names on this phone</summary>
+      <div class="field"><label for="bulkRet">Retailers <small>(one per line)</small></label>
+        <textarea id="bulkRet" placeholder="Naresh Garnal store&#10;Sharma Traders"></textarea></div>
+      <div class="field"><label for="bulkItems">Items <small>(one per line, price after a comma or tab is optional)</small></label>
+        <textarea id="bulkItems" placeholder="1Ltr, 950&#10;5Ltr, 3202"></textarea></div>
+      <div class="actions"><button type="button" class="primary" id="bulkBtn">Add to this phone</button></div>
+    </details>
+  </section>
+</main>
+
+<!-- ============ SETTINGS ============ -->
+<main class="view" id="v-settings" hidden>
+  <section class="card">
+    <div class="cardhead"><h2>Account</h2></div>
+    <div id="acctText" class="muted"></div>
+    <div class="field" id="nameField">
+      <label for="localName">Your name <small>(shown on your orders)</small></label>
+      <input id="localName" autocomplete="name" placeholder="e.g. Rajesh">
+    </div>
+    <div class="actions"><button type="button" id="logoutBtn">Log out</button></div>
+  </section>
+
+  <section class="card">
+    <div class="cardhead"><h2>WhatsApp</h2></div>
+    <div class="field">
+      <label for="groupLink">Group invite link</label>
+      <input id="groupLink" inputmode="url" placeholder="https://chat.whatsapp.com/…" autocomplete="off">
+      <p class="hint">Optional. Adds a "Copy &amp; open group" button on the order slip.</p>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="cardhead"><h2>Backup</h2></div>
+    <p class="hint" style="margin-top:0">Orders on this phone that are not uploaded yet exist only here. Download a backup now and then.</p>
+    <div class="actions">
+      <button type="button" id="exportBtn">Download backup</button>
+      <button type="button" id="importBtn">Restore backup</button>
+      <input type="file" id="importFile" accept="application/json" hidden>
+    </div>
+  </section>
+
+  <section class="card">
+    <details style="border-top:0;padding-top:0;margin-top:0">
+      <summary>Advanced: backend address</summary>
+      <p class="hint">Normally set by the owner in <code>config.js</code>. Use this to test a new backend on this phone.</p>
+      <div class="field"><label for="backendUrl">Web app URL</label>
+        <input id="backendUrl" inputmode="url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off"></div>
+      <div class="actions"><button type="button" id="backendTest">Test</button><button type="button" class="primary" id="backendSave">Save</button></div>
+      <p class="hint" id="backendMsg"></p>
+    </details>
+  </section>
+
+  <section class="card">
+    <div class="cardhead"><h2>Install</h2></div>
+    <p class="hint" style="margin-top:0">Android: in Chrome open the menu (three dots) and choose Install app or Add to Home screen. iPhone: in Safari tap Share, then Add to Home Screen.</p>
+    <p class="hint">Version 3.0</p>
+  </section>
+</main>
+
+<!-- bottom bars -->
+<div class="bar" id="bookBar"><div class="inner"><button type="button" class="send" id="newBtn">+ New order</button></div></div>
+<div class="bar" id="slipBar" hidden><div class="inner">
+  <button type="button" id="saveBtn">Save</button>
+  <button type="button" class="send" id="sendBtn">Save &amp; Send</button>
+</div></div>
+
+<!-- menu -->
+<div class="drawerwrap" id="drawer" hidden>
+  <div class="backdrop" id="drawerBackdrop"></div>
+  <nav class="drawer" aria-label="Main menu">
+    <div class="drawerhead"><strong>Order Book</strong><button type="button" class="icon" id="drawerClose" aria-label="Close menu">&times;</button></div>
+    <button type="button" class="item" data-go="book">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/></svg>Order Book
+    </button>
+    <button type="button" class="item" data-go="new">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New order
+    </button>
+    <button type="button" class="item" data-go="lists">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg>Retailers &amp; items
+    </button>
+    <button type="button" class="item" data-go="settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>Settings
+    </button>
+    <div class="foot muted" id="drawerFoot"></div>
+  </nav>
+</div>
+
+<div class="overlay" id="manual" hidden role="dialog" aria-modal="true" aria-labelledby="manualT">
+  <div class="dialog">
+    <h2 id="manualT">Copy the message</h2>
+    <p class="hint">Your phone blocked automatic copying. Tap Select all, then choose Copy from the menu that appears.</p>
+    <textarea id="manualText" readonly rows="10" style="margin-top:10px"></textarea>
+    <div class="actions"><button type="button" class="primary" id="manualSel">Select all</button><button type="button" id="manualClose">Close</button></div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const el = (tag, cls) => { const e = document.createElement(tag); if(cls) e.className = cls; return e; };
+
+  // ======== helpers ========
+  const uid = () => Math.random().toString(36).slice(2, 9);
+  const newId = () => Date.now().toString(36) + uid();
+  const num = v => { const n = parseFloat(String(v == null ? '' : v).replace(/,/g, '')); return isNaN(n) ? 0 : n; };
+  const money = n => '\u20B9' + n.toLocaleString('en-IN', {maximumFractionDigits:2});
+  const key = s => String(s == null ? '' : s).trim().toLowerCase();
+  const OWNER_STATUSES = ['Confirmed', 'Dispatched', 'Delivered'];
+  const fmtDT = ms => new Date(ms).toLocaleString('en-IN', {day:'numeric', month:'short', hour:'numeric', minute:'2-digit'});
+  const fmtDate = ms => new Date(ms).toLocaleDateString('en-IN', {day:'numeric', month:'short', year:'numeric'});
+  const startOfDay = (d = new Date()) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.getTime(); };
+
+  // ======== storage (small settings) ========
+  let mem = {}, storageOk = true;
+  try { localStorage.setItem('__t', '1'); localStorage.removeItem('__t'); } catch(e){ storageOk = false; }
+  function get(k, d){
+    try { if(storageOk){ const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } } catch(e){}
+    return k in mem ? mem[k] : d;
+  }
+  function set(k, v){
+    mem[k] = v;
+    try { if(storageOk) localStorage.setItem(k, JSON.stringify(v)); } catch(e){ storageOk = false; }
+  }
+  const SETTING_KEYS = ['ord:name', 'ord:group', 'ord:lr', 'ord:li', 'ord:recent'];
+
+  // ======== backend / account ========
+  const backendUrl = () => String(get('ord:backend', '') || (window.APP_CONFIG && window.APP_CONFIG.SCRIPT_URL) || '').trim();
+  const isLocal = () => !backendUrl();
+  let me = get('ord:me', null);               // {code, user:{name,short,role}, perms:{seeAll,editAll}}
+  function curUser(){
+    if(isLocal()) return {short:'LOC', name:String(get('ord:name', '') || '').trim() || 'Me', role:'admin'};
+    return me && me.user ? me.user : {short:'USR', name:'User', role:'sales'};
+  }
+  function curPerms(){
+    if(isLocal()) return {seeAll:true, editAll:true};
+    return (me && me.perms) || {seeAll:false, editAll:false};
+  }
+  function applyGate(){
+    const need = !isLocal() && !(me && me.code);
+    document.documentElement.className = need ? 'gate' : '';
+  }
+
+  // ======== orders database (IndexedDB) ========
+  let db = null, ordMem = [];
+  function openDB(){
+    return new Promise(res => {
+      try {
+        const r = indexedDB.open('order-app', 2);
+        r.onupgradeneeded = () => {
+          const d = r.result;
+          if(!d.objectStoreNames.contains('history')){ const st = d.createObjectStore('history', {keyPath:'id'}); st.createIndex('at', 'at'); }
+          if(!d.objectStoreNames.contains('orders')){
+            const st = d.createObjectStore('orders', {keyPath:'id'});
+            st.createIndex('createdAt', 'createdAt'); st.createIndex('sync', 'sync');
+          }
+        };
+        r.onsuccess = () => res(r.result);
+        r.onerror = r.onblocked = () => res(null);
+      } catch(e){ res(null); }
+    });
+  }
+  const store = (name, mode) => db.transaction(name, mode).objectStore(name);
+  const wait = req => new Promise(res => { req.onsuccess = () => res(req.result); req.onerror = () => res(null); });
+  const oPut = o => db ? wait(store('orders', 'readwrite').put(o)) : (ordMem = ordMem.filter(x => x.id !== o.id), ordMem.push(o), Promise.resolve());
+  const oGet = id => db ? wait(store('orders', 'readonly').get(id)) : Promise.resolve(ordMem.find(x => x.id === id) || null);
+  const oAll = () => db ? wait(store('orders', 'readonly').getAll()).then(a => a || []) : Promise.resolve(ordMem.slice());
+  const oPending = () => db ? wait(store('orders', 'readonly').index('sync').getAll(IDBKeyRange.only('pending'))).then(a => a || []) : Promise.resolve(ordMem.filter(o => o.sync === 'pending'));
+  function oQuery(f, limit){
+    const match = o => (!f.short || (o.by && o.by.short) === f.short) &&
+      (!f.q || (o.no + ' ' + o.retailer + ' ' + ((o.by && o.by.name) || '') + ' ' + o.status).toLowerCase().includes(f.q));
+    const out = {items:[], total:0, sum:0, more:false};
+    const take = o => {
+      out.total++;
+      if(o.status !== 'Cancelled') out.sum += calc(o).amt;
+      if(out.items.length < limit) out.items.push(o); else out.more = true;
+    };
+    if(!db){
+      ordMem.filter(o => o.createdAt >= f.since && match(o)).sort((a, b) => b.createdAt - a.createdAt).forEach(take);
+      return Promise.resolve(out);
+    }
+    return new Promise(res => {
+      const range = f.since > 0 ? IDBKeyRange.lowerBound(f.since) : null;
+      const req = store('orders', 'readonly').index('createdAt').openCursor(range, 'prev');
+      let seen = 0;
+      req.onsuccess = () => {
+        const c = req.result;
+        if(!c || ++seen > 6000){ res(out); return; }
+        if(match(c.value)) take(c.value);
+        c.continue();
+      };
+      req.onerror = () => res(out);
+    });
+  }
+  async function migrateLegacy(){
+    if(!db || get('ord:mig3', false) || !db.objectStoreNames.contains('history')) { set('ord:mig3', true); return; }
+    const old = await wait(store('history', 'readonly').getAll()) || [];
+    for(const e of old){
+      const o = e.order || {};
+      const lines = (o.lines || []).filter(l => l.item && String(l.item).trim()).map(l => ({item:l.item, qty:String(l.qty || '1'), price:l.price === undefined ? '' : String(l.price)}));
+      if(!lines.length) continue;
+      const at = e.createdAt || e.at || Date.now();
+      await oPut({id:String(e.id), no:'OLD-' + new Date(at).getDate() + '-' + String(e.id).slice(-3).toUpperCase(), createdAt:at, updatedAt:e.at || at,
+        by:{short:'LOC', name:'Me'}, retailer:e.retailer || '', notes:o.notes || '', showAmt:o.showTotals !== false, lines,
+        status:'Sent', rev:1, sentAt:e.at || at, sync:'local'});
+    }
+    set('ord:mig3', true);
+  }
+
+  // ======== master lists + names used on this phone ========
+  let master = get('ord:master2', null) || {v:'', at:0, retailers:[], items:[]};
+  let localR = get('ord:lr', []);
+  let localI = get('ord:li', []);
+  let R = [], I = [], rMap = new Map(), iMap = new Map();
+  function rebuild(){
+    rMap = new Map(); iMap = new Map();
+    master.retailers.forEach(n => { const k = key(n); if(k && !rMap.has(k)) rMap.set(k, {name:n, local:false}); });
+    localR.forEach(n => { const k = key(n); if(k && !rMap.has(k)) rMap.set(k, {name:n, local:true}); });
+    master.items.forEach(it => { const k = key(it.name); if(k && !iMap.has(k)) iMap.set(k, {name:it.name, price:it.price || '', local:false}); });
+    localI.forEach(it => { const k = key(it.name); if(k && !iMap.has(k)) iMap.set(k, {name:it.name, price:it.price || '', local:true}); });
+    const cmp = (a, b) => a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'});
+    R = [...rMap.values()].sort(cmp); I = [...iMap.values()].sort(cmp);
+  }
+  rebuild();
+  const hasMaster = () => master.retailers.length > 0 || master.items.length > 0;   // "New" tags only make sense once there is a master list
+  function rememberNames(o){
+    const r = o.retailer.trim();
+    if(r){
+      if(!rMap.has(key(r))){ localR.push(r); set('ord:lr', localR); }
+      const rec = (get('ord:recent', []) || []).filter(n => key(n) !== key(r)); rec.unshift(r); set('ord:recent', rec.slice(0, 8));
+    }
+    o.lines.forEach(l => {
+      const n = l.item.trim(), p = String(l.price).trim(), k = key(n), m = iMap.get(k);
+      if(!n) return;
+      if(!m) localI.push({name:n, price:p});
+      else if(m.local && p){ const e = localI.find(x => key(x.name) === k); if(e) e.price = p; }
+    });
+    set('ord:li', localI); rebuild();
+  }
+
+  // ======== toast / copy ========
+  let toastTimer;
+  function toast(msg){
+    const t = $('toast'); t.textContent = msg; t.classList.add('on');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('on'), 2800);
+  }
+  function legacyCopy(text){
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;font-size:16px';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    try { ta.setSelectionRange(0, text.length); } catch(e){}
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch(e){}
+    document.body.removeChild(ta);
+    return ok;
+  }
+  function copyText(text){
+    return new Promise((res, rej) => {
+      const fallback = () => legacyCopy(text) ? res() : rej();
+      if(navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(res, fallback);
+      else fallback();
+    });
+  }
+  function showManual(text){ $('manualText').value = text; $('manual').hidden = false; $('manualText').focus(); $('manualText').select(); }
+
+  // ======== order maths + message ========
+  function calc(o){
+    let qty = 0, amt = 0, unpriced = 0;
+    o.lines.forEach(l => {
+      const q = num(l.qty); qty += q;
+      if(String(l.price).trim() !== '') amt += q * num(l.price); else unpriced++;
+    });
+    return {items:o.lines.length, qty:Math.round(qty * 100) / 100, amt:Math.round(amt * 100) / 100, unpriced};
+  }
+  function buildText(o){
+    const lines = o.lines.filter(l => String(l.item).trim());
+    const t = calc({lines});
+    const showAmt = o.showAmt !== false;
+    const rows = lines.map((l, i) => {
+      const qs = String(l.qty).trim() || '1', ps = String(l.price).trim();
+      let s = (i + 1) + '. ' + String(l.item).trim() + ' \u2014 ';
+      if(ps){ s += qs + ' \u00D7 ' + money(num(ps)); if(showAmt) s += ' = ' + money(num(qs) * num(ps)); }
+      else s += 'Qty ' + qs;
+      return s;
+    });
+    if(!rows.length && !String(o.retailer).trim()) return '';
+    const by = (o.by && o.by.name) || curUser().name;
+    const out = ['*ORDER ' + (o.no || 'REQUEST') + '*', 'Date: ' + fmtDate(o.createdAt || Date.now())];
+    if(String(o.retailer).trim()) out.push('*Retailer:* ' + o.retailer.trim());
+    out.push('*Salesman:* ' + by);
+    if(rows.length){
+      out.push('', '*Order details*', ...rows, '', '*Total items:* ' + t.items + '  |  *Total qty:* ' + t.qty);
+      if(showAmt && t.amt > 0) out.push('*Total amount:* ' + money(t.amt) + (t.unpriced ? ' (excludes items without a price)' : ''));
+    }
+    if(String(o.notes).trim()) out.push('', '*Remarks*', o.notes.trim());
+    out.push('', 'Thank you.');
+    return out.join('\n');
+  }
+  function renderRich(node, text){
+    node.textContent = '';
+    text.split('\n').forEach((line, i) => {
+      if(i) node.appendChild(document.createElement('br'));
+      line.split(/(\*[^*]+\*)/).forEach(part => {
+        if(/^\*[^*]+\*$/.test(part)){ const b = document.createElement('strong'); b.textContent = part.slice(1, -1); node.appendChild(b); }
+        else if(part) node.appendChild(document.createTextNode(part));
+      });
+    });
+  }
+  function nextNo(){
+    const u = curUser(), d = new Date();
+    const dd = String(d.getDate()).padStart(2, '0') + String(d.getMonth() + 1).padStart(2, '0');
+    const k = 'ord:seq:' + u.short + ':' + dd, n = (Number(get(k, 0)) || 0) + 1;
+    set(k, n);
+    return u.short + '-' + dd + '-' + String(n).padStart(2, '0');
+  }
+  function bumpSeq(no, short){            // keep numbers moving forward when orders arrive from another phone
+    const m = /^([A-Za-z0-9]+)-(\d{4})-(\d+)$/.exec(no || '');
+    if(!m || m[1] !== short) return;
+    const k = 'ord:seq:' + short + ':' + m[2], n = Number(m[3]) || 0;
+    if(n > (Number(get(k, 0)) || 0)) set(k, n);
+  }
+
+  // ======== working order (the open slip) ========
+  const blankOrder = no => ({isNew:true, id:newId(), no:no || nextNo(), createdAt:0, by:null, retailer:'', notes:'', showAmt:true, lines:[], status:'Saved', rev:0, sentAt:0});
+  function fromDraft(d){
+    if(!d || !Array.isArray(d.lines)) return null;
+    return Object.assign(blankOrder(d.no), d, {isNew:true, lines:d.lines.map(l => ({id:l.id || uid(), item:String(l.item), qty:String(l.qty), price:String(l.price)}))});
+  }
+  let DRAFT = fromDraft(get('ord:draft2', null));    // the unsaved NEW order, kept across restarts
+  let W = null;                                      // the order currently open on the slip
+  const hasContent = o => !!(o && (String(o.retailer).trim() || o.lines.length));
+  const collect = () => ({
+    retailer:W.retailer.trim(), notes:W.notes.trim(), showAmt:!!W.showAmt,
+    lines:W.lines.filter(l => String(l.item).trim()).map(l => ({item:String(l.item).trim(), qty:String(l.qty).trim() || '1', price:String(l.price).trim()}))
+  });
+  const sigOf = c => JSON.stringify([key(c.retailer), c.notes, c.showAmt, c.lines.map(l => [key(l.item), l.qty, l.price])]);
+  const isDirty = () => !W.isNew && W.sig0 !== undefined && sigOf(collect()) !== W.sig0;
+  function persistDraft(){ if(W && W.isNew){ DRAFT = W; set('ord:draft2', {id:W.id, no:W.no, retailer:W.retailer, notes:W.notes, showAmt:W.showAmt, lines:W.lines}); } }
+  function slipEditable(){
+    if(W.isNew) return true;
+    if(W.status === 'Cancelled' || OWNER_STATUSES.includes(W.status)) return false;
+    return (W.by && W.by.short === curUser().short) || curPerms().editAll;
+  }
+
+  // ======== views + navigation ========
+  const TITLES = {book:'Order Book', slip:'Order Slip', lists:'Retailers & items', settings:'Settings'};
+  let view = 'book', slipPushed = false, skipPop = false;
+  function showView(v){
+    view = v;
+    ['book', 'slip', 'lists', 'settings'].forEach(n => { $('v-' + n).hidden = n !== v; });
+    $('viewTitle').textContent = TITLES[v];
+    $('bookBar').hidden = v !== 'book';
+    $('slipBar').hidden = !(v === 'slip' && slipEditable());
+    document.body.classList.toggle('with-bar', !$('bookBar').hidden || !$('slipBar').hidden);
+    document.querySelectorAll('.drawer .item[data-go]').forEach(b => b.classList.toggle('on', b.dataset.go === v));
+    closeDrawer();
+    if(v === 'book') renderBook();
+    if(v === 'lists') renderLists();
+    if(v === 'settings') loadSettings();
+    window.scrollTo(0, 0);
+  }
+  function openDrawer(){
+    $('drawerFoot').textContent = (curUser().name || '') + ' \u00B7 ' + pillText();
+    $('drawer').hidden = false; requestAnimationFrame(() => $('drawer').classList.add('open'));
+    $('menuBtn').setAttribute('aria-expanded', 'true'); document.body.classList.add('noscroll');
+  }
+  function closeDrawer(){
+    if($('drawer').hidden) return;
+    $('drawer').classList.remove('open'); $('menuBtn').setAttribute('aria-expanded', 'false'); document.body.classList.remove('noscroll');
+    setTimeout(() => { if(!$('drawer').classList.contains('open')) $('drawer').hidden = true; }, 200);
+  }
+  function confirmLeave(){
+    if(view === 'slip' && slipEditable() && isDirty()) return confirm('You have unsaved changes to this order. Leave without saving?');
+    return true;
+  }
+  function enterSlip(){
+    if(!slipPushed){ try { history.pushState({slip:1}, ''); slipPushed = true; } catch(e){} }
+    renderSlip(); showView('slip');
+  }
+  function leaveToBook(){
+    if(!confirmLeave()) return;
+    if(slipPushed){ slipPushed = false; skipPop = true; try { history.back(); } catch(e){ skipPop = false; } }
+    showView('book');
+  }
+  function navTo(v){
+    if(view === 'slip'){
+      if(!confirmLeave()) return;
+      if(slipPushed){ slipPushed = false; skipPop = true; try { history.back(); } catch(e){ skipPop = false; } }
+    }
+    showView(v);
+  }
+  window.addEventListener('popstate', () => {
+    if(skipPop){ skipPop = false; return; }
+    slipPushed = false;
+    if(view === 'slip'){
+      if(!confirmLeave()){ try { history.pushState({slip:1}, ''); slipPushed = true; } catch(e){} return; }
+      showView('book');
+    }
+  });
+
+  // ======== order book ========
+  const F = Object.assign({p:'today', s:'all'}, get('ord:f', {}) || {});
+  let bookLimit = 30, bookToken = 0;
+  function periodStart(){
+    if(F.p === 'today') return startOfDay();
+    if(F.p === '7') return startOfDay() - 6 * 86400000;
+    if(F.p === '30') return startOfDay() - 29 * 86400000;
+    return 0;
+  }
+  const syncIcon = o => o.sync === 'synced' ? ['\u2713 saved online', 'Saved online'] : o.sync === 'pending' ? ['\u21BB waiting', 'Waiting to upload'] : o.sync === 'failed' ? ['\u26A0 not saved', o.syncError || 'Upload failed'] : ['', ''];
+  async function renderBook(){
+    const token = ++bookToken;
+    const perms = curPerms();
+    const scope = perms.seeAll ? F.s : 'mine';          // never overwrite the saved choice: permissions can change after login
+    $('segScope').hidden = !perms.seeAll;
+    document.querySelectorAll('#segPeriod button').forEach(b => b.classList.toggle('on', b.dataset.p === F.p));
+    document.querySelectorAll('#segScope button').forEach(b => b.classList.toggle('on', b.dataset.s === scope));
+
+    const draftOk = DRAFT && hasContent(DRAFT);
+    $('draftCard').hidden = !draftOk;
+    if(draftOk){
+      $('draftNo').textContent = DRAFT.no;
+      $('draftText').textContent = (DRAFT.retailer.trim() || 'No retailer yet') + ' \u00B7 ' + DRAFT.lines.length + (DRAFT.lines.length === 1 ? ' item' : ' items');
+    }
+    const r = await oQuery({since:periodStart(), short:scope === 'mine' ? curUser().short : '', q:$('bookSearch').value.trim().toLowerCase()}, bookLimit);
+    if(token !== bookToken) return;
+    const box = $('bookList'); box.innerHTML = '';
+    $('sumCount').textContent = r.total + (r.total === 1 ? ' order' : ' orders');
+    $('sumAmt').textContent = r.total ? money(Math.round(r.sum * 100) / 100) : '';
+    if(!r.items.length){
+      const p = el('p', 'empty');
+      p.textContent = $('bookSearch').value.trim() ? 'No matching orders.' : (F.p === 'today' ? 'No orders today yet. Tap + New order to start.' : 'No orders in this period.');
+      box.appendChild(p);
+    }
+    r.items.forEach(o => {
+      const b = el('button', 'orow'); b.type = 'button';
+      const o1 = el('div', 'o1'), no = el('b', 'num'); no.textContent = o.no;
+      const st = el('span', 'badge st-' + o.status); st.textContent = o.status;
+      o1.append(no, st);
+      const o2 = el('div', 'o2'); o2.textContent = o.retailer;
+      const o3 = el('div', 'o3'); o3.textContent = fmtDT(o.createdAt) + (scope === 'all' && o.by ? ' \u00B7 ' + o.by.name : '');
+      const t = calc(o);
+      const amt = el('div', 'oamt num' + (o.status === 'Cancelled' ? ' cx' : '')); amt.textContent = t.amt > 0 ? money(t.amt) : '\u2013';
+      const ic = syncIcon(o);
+      if(ic[0] && !isLocal()){ const sy = el('span', 'sy'); sy.textContent = ic[0]; sy.title = ic[1]; amt.appendChild(sy); }
+      b.append(o1, o2, o3, amt);
+      b.addEventListener('click', () => openOrder(o));
+      box.appendChild(b);
+    });
+    $('bookMore').hidden = !r.more;
+  }
+
+  // ======== order slip ========
+  function setBadge(node, status){ node.className = 'badge st-' + status; node.textContent = status; }
+  function renderSlip(){
+    const ed = slipEditable(), u = W.by || curUser();
+    $('sNo').textContent = W.no;
+    $('sDate').textContent = fmtDT(W.createdAt || Date.now());
+    $('sBy').textContent = u.name;
+    setBadge($('sStatus'), W.isNew ? 'Saved' : W.status);
+    if(W.isNew) $('sStatus').textContent = 'New';
+    $('sRet').value = W.retailer; $('sRet').disabled = !ed;
+    $('sNotes').value = W.notes; $('sNotes').disabled = !ed;
+    $('sShowAmt').checked = W.showAmt !== false; $('sShowAmt').disabled = !ed;
+    $('sAddWrap').hidden = !ed;
+    let note = '';
+    if(!ed){
+      if(W.status === 'Cancelled') note = 'This order is cancelled.';
+      else if(OWNER_STATUSES.includes(W.status)) note = 'This order is ' + W.status.toLowerCase() + ' and is locked. Ask the owner if it needs a change.';
+      else note = 'This order was created by ' + ((W.by && W.by.name) || 'another user') + '. You can copy it or reuse it as a new order.';
+    }
+    $('sNotice').hidden = ed; $('sNoticeText').textContent = note;
+    renderLines(); slipChanged(true);
+    $('reuseBtn').hidden = W.isNew;
+    $('cancelBtn').hidden = !(ed && !W.isNew);
+    $('slipBar').hidden = !ed;
+    document.body.classList.toggle('with-bar', !$('bookBar').hidden || !$('slipBar').hidden);
+    $('slipHint').textContent = isLocal() ? 'Orders are saved on this phone only.' : 'Saved orders upload to the shared sheet automatically. WhatsApp opens with the message ready.';
+  }
+  function updateRetTag(){ const v = W.retailer.trim(); $('sRetNew').hidden = !hasMaster() || !v || rMap.has(key(v)); }
+  function slipChanged(skipPersist){
+    const o = collect(), t = calc(o);
+    $('tItems').textContent = t.items; $('tQty').textContent = t.qty; $('tAmt').textContent = money(t.amt);
+    $('tNote').hidden = !t.unpriced; $('tNote').textContent = t.unpriced ? t.unpriced + (t.unpriced === 1 ? ' item has' : ' items have') + ' no rate yet' : '';
+    $('sEmpty').hidden = W.lines.length > 0;
+    updateRetTag();
+    const msg = buildText(Object.assign({}, W, o, {lines:o.lines}));
+    const pv = $('preview'); if(msg) renderRich(pv, msg); else pv.textContent = 'Your message will appear here.';
+    // button labels
+    const resend = !W.isNew && W.status === 'Sent' && !isDirty();
+    $('sendBtn').textContent = resend ? 'Resend on WhatsApp' : (!W.isNew && W.status === 'Sent' ? 'Send updated order' : 'Save & Send');
+    $('saveBtn').textContent = W.isNew ? 'Save' : 'Save changes';
+    if(!skipPersist) persistDraft();
+  }
+  function renderLines(){
+    const box = $('sLines'); box.innerHTML = '';
+    const ed = slipEditable();
+    W.lines.forEach((l, idx) => {
+      const row = el('div', 'srow'); row.dataset.id = l.id;
+      const sr = el('div', 'sr num'); sr.textContent = idx + 1;
+      const nm = el('div', 'sitem'); nm.textContent = l.item;
+      if(hasMaster() && !iMap.has(key(l.item))){ const t = el('span', 'tag'); t.textContent = 'New'; nm.append(' ', t); }
+      const rm = el('button', 'icon'); rm.type = 'button'; rm.textContent = '\u00D7'; rm.setAttribute('aria-label', 'Remove ' + l.item); rm.hidden = !ed;
+
+      const nums = el('div', 'snums');
+      const step = el('div', 'stepper');
+      const minus = el('button'); minus.type = 'button'; minus.textContent = '\u2212'; minus.setAttribute('aria-label', 'Decrease quantity'); minus.disabled = !ed;
+      const plus = el('button'); plus.type = 'button'; plus.textContent = '+'; plus.setAttribute('aria-label', 'Increase quantity'); plus.disabled = !ed;
+      const qty = el('input', 'q'); qty.type = 'number'; qty.inputMode = 'numeric'; qty.min = '0'; qty.value = l.qty; qty.disabled = !ed;
+      qty.setAttribute('aria-label', 'Quantity of ' + l.item); qty.enterKeyHint = 'next';
+      step.append(minus, qty, plus);
+      const x = el('span', 'times'); x.textContent = '\u00D7';
+      const pr = el('label', 'pr'); const rs = el('span'); rs.textContent = '\u20B9';
+      const price = el('input'); price.type = 'number'; price.inputMode = 'decimal'; price.min = '0'; price.placeholder = 'Rate'; price.value = l.price; price.disabled = !ed;
+      price.setAttribute('aria-label', 'Rate of ' + l.item);
+      pr.append(rs, price);
+      const amt = el('span', 'amt num');
+      nums.append(step, x, pr, amt);
+      row.append(sr, nm, rm, nums); box.appendChild(row);
+
+      const upd = () => { amt.textContent = String(l.price).trim() ? money(num(l.qty) * num(l.price)) : ''; };
+      upd();
+      qty.addEventListener('input', () => { l.qty = qty.value; upd(); slipChanged(); });
+      qty.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); $('sAdd').focus(); } });
+      price.addEventListener('input', () => { l.price = price.value; upd(); slipChanged(); });
+      minus.addEventListener('click', () => { l.qty = String(Math.max(1, num(l.qty) - 1)); qty.value = l.qty; upd(); slipChanged(); });
+      plus.addEventListener('click', () => { l.qty = String(num(l.qty) + 1); qty.value = l.qty; upd(); slipChanged(); });
+      rm.addEventListener('click', () => { W.lines = W.lines.filter(z => z.id !== l.id); renderLines(); slipChanged(); });
+    });
+  }
+  function addLine(name, price){
+    name = String(name).trim(); if(!name) return;
+    const k = key(name);
+    let l = W.lines.find(x => key(x.item) === k);
+    if(l) l.qty = String(num(l.qty) + 1);
+    else {
+      const m = iMap.get(k);
+      l = {id:uid(), item:m ? m.name : name, qty:'1', price:price !== undefined && price !== null ? String(price) : (m ? m.price : '')};
+      W.lines.push(l);
+    }
+    renderLines(); slipChanged();
+    const q = $('sLines').querySelector('.srow[data-id="' + l.id + '"] .q');
+    if(q){ q.focus(); q.select(); }
+  }
+
+  // type-ahead used by the retailer box and the add-item box
+  function typeahead(input, listEl, getOptions, onPick, allowNew){
+    let shown = [];
+    const hide = () => { listEl.hidden = true; };
+    function render(){
+      const q = input.value.trim(), ql = q.toLowerCase();
+      shown = getOptions(ql).slice(0, 8);
+      listEl.innerHTML = '';
+      shown.forEach(x => {
+        const b = el('button', 'taopt'); b.type = 'button'; b.tabIndex = -1;
+        const n = el('span'); n.textContent = x.name; b.appendChild(n);
+        if(x.price){ const m = el('span', 'm num'); m.textContent = money(num(x.price)); b.appendChild(m); }
+        else if(x.local){ const m = el('span', 'm'); m.textContent = 'This phone'; b.appendChild(m); }
+        b.addEventListener('pointerdown', e => e.preventDefault());
+        b.addEventListener('click', () => { hide(); onPick(x); });
+        listEl.appendChild(b);
+      });
+      if(allowNew && q && !shown.some(x => key(x.name) === ql)){
+        const b = el('button', 'taopt new'); b.type = 'button'; b.tabIndex = -1;
+        b.textContent = 'Add \u201C' + q + '\u201D as a new item';
+        b.addEventListener('pointerdown', e => e.preventDefault());
+        b.addEventListener('click', () => { hide(); onPick({name:q, isNew:true}); });
+        listEl.appendChild(b);
+      }
+      listEl.hidden = !listEl.children.length;
+    }
+    input.addEventListener('input', render);
+    input.addEventListener('focus', render);
+    input.addEventListener('blur', () => setTimeout(hide, 180));
+    input.addEventListener('keydown', e => {
+      if(e.key === 'Escape'){ hide(); return; }
+      if(e.key !== 'Enter') return;
+      e.preventDefault();
+      const q = input.value.trim(), ql = q.toLowerCase();
+      shown = getOptions(ql);
+      const exact = shown.find(x => key(x.name) === ql);
+      hide();
+      if(exact) onPick(exact);
+      else if(allowNew && q) onPick({name:q, isNew:true});
+      else if(shown[0]) onPick(shown[0]);
+    });
+  }
+  typeahead($('sRet'), $('sRetList'), q => {
+    if(!q) return (get('ord:recent', []) || []).map(n => rMap.get(key(n))).filter(Boolean);
+    const starts = R.filter(x => key(x.name).startsWith(q)), rest = R.filter(x => !key(x.name).startsWith(q) && key(x.name).includes(q));
+    return starts.concat(rest);
+  }, x => { W.retailer = x.name; $('sRet').value = x.name; slipChanged(); $('sAdd').focus(); }, false);
+  typeahead($('sAdd'), $('sAddList'), q => {
+    if(!q) return [];
+    const starts = I.filter(x => key(x.name).startsWith(q)), rest = I.filter(x => !key(x.name).startsWith(q) && key(x.name).includes(q));
+    return starts.concat(rest);
+  }, x => { $('sAdd').value = ''; addLine(x.name, x.isNew ? '' : x.price); }, true);
+
+  // ======== slip actions ========
+  function openNew(){
+    if(!DRAFT) DRAFT = blankOrder();
+    W = DRAFT; persistDraft(); enterSlip();
+  }
+  function openOrder(o){
+    W = {isNew:false, id:o.id, no:o.no, createdAt:o.createdAt, by:o.by, retailer:o.retailer, notes:o.notes || '', showAmt:o.showAmt !== false,
+      status:o.status, rev:o.rev || 1, sentAt:o.sentAt || 0, sync:o.sync,
+      lines:o.lines.map(l => ({id:uid(), item:String(l.item), qty:String(l.qty), price:l.price === undefined || l.price === null ? '' : String(l.price)}))};
+    W.sig0 = sigOf(collect());
+    enterSlip();
+  }
+  function validate(){
+    const c = collect();
+    if(!c.retailer){ toast('Choose or type the retailer first'); $('sRet').focus(); return null; }
+    if(!c.lines.length){ toast('Add at least one item'); $('sAdd').focus(); return null; }
+    if(c.lines.some(l => num(l.qty) <= 0)){ toast('Every item needs a quantity above zero'); return null; }
+    return c;
+  }
+  function waLink(text){ return 'https://wa.me/?text=' + encodeURIComponent(text); }
+  const taps = {};   // ignore a second tap on the SAME button within 1.5 seconds
+  const tapOk = k => { if(taps[k]) return false; taps[k] = true; setTimeout(() => { taps[k] = false; }, 1500); return true; };
+
+  function saveOrder(send){
+    const lock = 'save:' + W.id;                       // a second tap on the same order is ignored; other orders are not affected
+    if(!tapOk(lock)) return;
+    const c = validate(); if(!c){ taps[lock] = false; return; }
+    const now = Date.now(), u = curUser();
+    const changed = W.isNew || isDirty();
+    let status = W.status;
+    if(send) status = 'Sent';
+    else if(W.isNew) status = 'Saved';
+    else if(changed && W.status === 'Sent') status = 'Edited';
+    const o = {id:W.id, no:W.no, createdAt:W.createdAt || now, updatedAt:now, by:W.by || {short:u.short, name:u.name},
+      retailer:c.retailer, notes:c.notes, showAmt:c.showAmt, lines:c.lines, status,
+      rev:(changed || status !== W.status) ? (W.rev || 0) + 1 : (W.rev || 1), sentAt:send ? now : (W.sentAt || 0),
+      sync:isLocal() ? 'local' : ((changed || status !== W.status) ? 'pending' : (W.sync || 'pending'))};
+    if(send) window.open(waLink(buildText(o)), '_blank', 'noopener');       // open WhatsApp right away, inside the tap
+    oPut(o).then(() => {
+      rememberNames(o);
+      if(W.isNew){ DRAFT = null; set('ord:draft2', null); }
+      toast(o.no + (send ? ' saved and sent' : ' saved'));
+      leaveAfterSave();
+      refreshPending(); scheduleSync();
+    });
+  }
+  let navGuard = 0;   // a double tap on "Save & Send" must not land on "+ New order", which appears in the same spot
+  function leaveAfterSave(){
+    navGuard = Date.now() + 800;
+    if(slipPushed){ slipPushed = false; skipPop = true; try { history.back(); } catch(e){ skipPop = false; } }
+    W = null; showView('book');
+  }
+  function primaryAction(){
+    if(!W.isNew && W.status === 'Sent' && !isDirty()){      // plain resend, nothing to save
+      if(!tapOk('resend:' + W.id)) return;
+      window.open(waLink(buildText(Object.assign({}, W, collect()))), '_blank', 'noopener'); toast('Opened WhatsApp'); return;
+    }
+    saveOrder(true);
+  }
+  function copyMessage(group){
+    if(!tapOk('copy')) return;
+    const text = buildText(Object.assign({}, W, collect()));
+    if(!text){ toast('Nothing to copy yet'); return; }
+    copyText(text).then(() => {
+      toast(group ? 'Copied. Paste it in the group.' : 'Message copied');
+      if(group) window.open($('groupLink').value.trim(), '_blank', 'noopener');
+    }, () => showManual(text));
+  }
+  function cancelOrder(){
+    if(!confirm('Cancel order ' + W.no + '? It stays in the Order Book marked as Cancelled.')) return;
+    const now = Date.now();
+    oGet(W.id).then(cur => {
+      const o = Object.assign({}, cur || {}, {status:'Cancelled', updatedAt:now, rev:((cur && cur.rev) || W.rev || 1) + 1, sync:isLocal() ? 'local' : 'pending'});
+      return oPut(o);
+    }).then(() => { toast('Order cancelled'); leaveAfterSave(); refreshPending(); scheduleSync(); });
+  }
+  function reuseAsNew(){
+    if(DRAFT && hasContent(DRAFT) && !confirm('Replace your unsaved order with a copy of this one?')) return;
+    const src = collect();
+    DRAFT = Object.assign(blankOrder(), {retailer:src.retailer, notes:src.notes, showAmt:src.showAmt,
+      lines:src.lines.map(l => ({id:uid(), item:l.item, qty:l.qty, price:l.price}))});
+    W = DRAFT; persistDraft();
+    enterSlip(); toast('New order started from ' + (src.retailer || 'a previous order'));   // already on the slip screen: no history change needed
+  }
+
+  // ======== lists screen ========
+  let listTab = 'retailers';
+  function renderLists(){
+    $('listStatus').textContent = listStatusText();
+    $('segR').textContent = 'Retailers (' + R.length + ')'; $('segI').textContent = 'Items (' + I.length + ')';
+    $('segR').classList.toggle('on', listTab === 'retailers'); $('segI').classList.toggle('on', listTab === 'items');
+    const q = $('listSearch').value.trim().toLowerCase(), box = $('listBox');
+    box.innerHTML = '';
+    const src = listTab === 'retailers' ? R : I, out = src.filter(x => !q || x.name.toLowerCase().includes(q));
+    if(!src.length){ const p = el('p', 'empty'); p.textContent = isLocal() ? 'Nothing here yet. Add names below, or they are saved when you save an order.' : 'Nothing here yet. Tap Refresh to download the lists.'; box.appendChild(p); }
+    else if(!out.length){ const p = el('p', 'empty'); p.textContent = 'No match.'; box.appendChild(p); }
+    out.slice(0, 300).forEach(x => {
+      const row = el('div', 'lrow'), main = el('div', 'main');
+      main.style.cursor = 'default';
+      const nm = el('span', 'nm'); nm.textContent = x.name; main.appendChild(nm);
+      const right = el('span', 'meta num');
+      if(listTab === 'items' && x.price) right.textContent = money(num(x.price));
+      main.appendChild(right); row.appendChild(main);
+      if(x.local){
+        const t = el('span', 'tag'); t.textContent = 'This phone'; row.appendChild(t);
+        const del = el('button', 'icon'); del.type = 'button'; del.textContent = '\u00D7'; del.setAttribute('aria-label', 'Remove ' + x.name);
+        del.addEventListener('click', () => {
+          if(listTab === 'retailers'){ localR = localR.filter(n => key(n) !== key(x.name)); set('ord:lr', localR); }
+          else { localI = localI.filter(n => key(n.name) !== key(x.name)); set('ord:li', localI); }
+          rebuild(); renderLists();
+        });
+        row.appendChild(del);
+      }
+      box.appendChild(row);
+    });
+    if(out.length > 300){ const p = el('p', 'empty'); p.textContent = 'Showing 300. Type to narrow down.'; box.appendChild(p); }
+  }
+  function listStatusText(){
+    if(isLocal()) return 'Local mode. No shared list is connected.';
+    if(!master.at) return 'Not downloaded yet.';
+    return master.retailers.length + ' retailers, ' + master.items.length + ' items. Updated ' + fmtDT(master.at) + '.';
+  }
+  function bulkAdd(){
+    let ar = 0, ai = 0;
+    $('bulkRet').value.split('\n').forEach(line => { const r = line.trim(); if(!r || rMap.has(key(r))) return; localR.push(r); rMap.set(key(r), {name:r, local:true}); ar++; });
+    $('bulkItems').value.split('\n').forEach(line => {
+      line = line.trim(); if(!line) return;
+      let name = line, price = '';
+      const m = line.match(/^(.*?)[\t,]\s*(\d[\d.,]*)\s*$/);
+      if(m){ name = m[1].trim(); price = m[2].replace(/,/g, ''); }
+      if(!name || iMap.has(key(name))) return;
+      localI.push({name, price}); iMap.set(key(name), {name, price, local:true}); ai++;
+    });
+    set('ord:lr', localR); set('ord:li', localI); rebuild();
+    $('bulkRet').value = ''; $('bulkItems').value = '';
+    renderLists(); toast('Added ' + ar + ' retailers and ' + ai + ' items');
+  }
+
+  // ======== sync with the Google Sheet backend ========
+  let syncing = false, syncErr = '', pendingCount = 0, lastSyncAt = Number(get('ord:lastsync', 0)) || 0, syncTimer = null;
+  function pillText(){
+    if(isLocal()) return 'Local only';
+    if(syncing) return 'Syncing\u2026';
+    if(!navigator.onLine) return 'Offline' + (pendingCount ? ' \u00B7 ' + pendingCount + ' waiting' : '');
+    if(syncErr) return 'Sync failed' + (pendingCount ? ' \u00B7 ' + pendingCount + ' waiting' : '');
+    if(pendingCount) return pendingCount + ' waiting';
+    return lastSyncAt ? 'Synced ' + new Date(lastSyncAt).toLocaleTimeString('en-IN', {hour:'numeric', minute:'2-digit'}) : 'Not synced yet';
+  }
+  const setPill = () => { $('syncPill').textContent = pillText(); };
+  function refreshPending(){ return oPending().then(a => { pendingCount = a.length; setPill(); }); }
+  const toWire = o => ({id:o.id, no:o.no, createdAt:o.createdAt, retailer:o.retailer, notes:o.notes || '', showAmt:o.showAmt !== false, status:o.status,
+    rev:o.rev, sentAt:o.sentAt || 0, lines:o.lines.map(l => ({item:l.item, qty:num(l.qty), price:num(l.price)}))});
+  async function api(url, body){
+    const ctl = 'AbortController' in window ? new AbortController() : null;
+    const tm = setTimeout(() => { if(ctl) ctl.abort(); }, 30000);
+    try {
+      const r = await fetch(url, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(body), signal:ctl ? ctl.signal : undefined});
+      const t = await r.text();
+      try { return JSON.parse(t); } catch(e){ return {ok:false, error:'bad_reply'}; }
+    } catch(e){ return {ok:false, error:'network'}; }
+    finally { clearTimeout(tm); }
+  }
+  async function applyServer(res, sent, code){
+    me = {code, user:res.user, perms:res.perms}; set('ord:me', me);
+    if(res.lists){
+      master = {v:res.lists.v, at:Date.now(), retailers:res.lists.retailers.map(r => r.name), items:res.lists.items};
+      set('ord:master2', master); rebuild();
+      localR = localR.filter(n => { const e = rMap.get(key(n)); return e && e.local; });
+      localI = localI.filter(n => { const e = iMap.get(key(n.name)); return e && e.local; });
+      set('ord:lr', localR); set('ord:li', localI); rebuild();
+    }
+    for(const a of res.accepted || []){
+      const o = await oGet(a.id);
+      if(o && o.rev === a.rev){ o.sync = 'synced'; delete o.syncError; await oPut(o); }
+    }
+    for(const r of res.rejected || []){
+      const o = await oGet(r.id);
+      if(o){
+        o.sync = 'failed';
+        o.syncError = {stale:'Changed on another phone', not_yours:'Not your order', no_retailer:'Retailer missing', bad_lines:'Items missing'}[r.reason] || ('Rejected: ' + r.reason);
+        await oPut(o);
+      }
+    }
+    for(const so of res.orders || []){
+      const local = await oGet(so.id);
+      if(local && local.sync !== 'synced' && local.sync !== 'local' && (local.rev || 0) >= (so.rev || 0)) continue;   // our newer change is still waiting to upload
+      if(local && (local.rev || 0) > (so.rev || 0)) continue;
+      await oPut(Object.assign({}, so, {sync:'synced'}));
+      if(so.by && so.by.short === curUser().short) bumpSeq(so.no, so.by.short);
+    }
+    set('ord:cursor', res.cursor || 0);
+  }
+  async function syncNow(opts){
+    opts = opts || {};
+    const url = backendUrl();
+    if(!url){ setPill(); return {ok:false, error:'local'}; }
+    const code = opts.code || (me && me.code);
+    if(!code) return {ok:false, error:'auth'};
+    if(!navigator.onLine){ setPill(); if(opts.manual) toast('You are offline. Orders will upload when you are back online.'); return {ok:false, error:'network'}; }
+    if(syncing) return {ok:false, error:'busy_local'};
+    syncing = true; setPill();
+    let result = {ok:true};
+    try {
+      for(let i = 0; i < 6; i++){
+        const pending = (await oPending()).slice(0, 25);
+        const res = await api(url, {a:'sync', code, cursor:Number(get('ord:cursor', 0)) || 0, lv:master.v || '', orders:pending.map(toWire)});
+        if(!res.ok){
+          if(res.error === 'auth' && me && me.code){ me = null; set('ord:me', null); applyGate(); }
+          result = res; break;
+        }
+        await applyServer(res, pending, code);
+        if(!res.more && pending.length < 25) break;
+      }
+      if(result.ok){ lastSyncAt = Date.now(); set('ord:lastsync', lastSyncAt); syncErr = ''; if(opts.manual) toast('Synced'); }
+      else { syncErr = result.error || 'failed'; if(opts.manual && result.error !== 'auth') toast('Could not sync (' + syncErr + '). Your orders are safe on this phone.'); }
+    } catch(e){ result = {ok:false, error:'client'}; syncErr = 'client'; }
+    syncing = false;
+    await refreshPending();
+    if(view === 'book') renderBook();
+    if(view === 'lists') renderLists();
+    return result;
+  }
+  function scheduleSync(){ clearTimeout(syncTimer); if(!isLocal() && me) syncTimer = setTimeout(() => syncNow({}), 700); }
+
+  // ======== login ========
+  const loginErr = msg => { $('loginErr').textContent = msg; $('loginErr').hidden = !msg; };
+  $('loginShow').addEventListener('change', e => { $('loginCode').type = e.target.checked ? 'text' : 'password'; });
+  $('loginForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const code = $('loginCode').value.trim();
+    if(!code) return;
+    $('loginBtn').disabled = true; $('loginBtn').textContent = 'Checking\u2026'; loginErr('');
+    const r = await syncNow({code});
+    $('loginBtn').disabled = false; $('loginBtn').textContent = 'Continue';
+    if(r && r.ok){
+      $('loginCode').value = ''; applyGate(); rebuild(); await refreshPending();
+      showView('book'); toast('Welcome, ' + curUser().name);
+    } else {
+      loginErr({auth:'That code is not valid. Check it and try again.', network:'Could not connect. Check your internet and try again.',
+        bad_reply:'The backend address looks wrong, or it is not deployed for "Anyone".', busy:'The server is busy. Please try again.'}[r && r.error] || 'Something went wrong. Please try again.');
+      $('loginCode').select();
+    }
+  });
+  function logout(){
+    const warn = pendingCount ? '\n\n' + pendingCount + ' order(s) are not uploaded yet. They stay on this phone and upload after you log in again.' : '';
+    if(!confirm('Log out of this phone?' + warn)) return;
+    me = null; set('ord:me', null); applyGate(); $('loginCode').value = ''; loginErr('');
+  }
+
+  // ======== settings, backup ========
+  function loadSettings(){
+    const local = isLocal(), u = curUser();
+    $('acctText').textContent = local ? 'Local mode: orders stay on this phone. Ask the owner to connect the shared sheet.' : 'Signed in as ' + u.name + ' (' + u.role + ', ' + u.short + ').';
+    $('nameField').hidden = !local; $('localName').value = String(get('ord:name', '') || '');
+    $('logoutBtn').hidden = local;
+    $('groupLink').value = String(get('ord:group', '') || '');
+    $('backendUrl').value = String(get('ord:backend', '') || '');
+    $('backendMsg').textContent = local ? 'No backend address set.' : 'Using: ' + backendUrl().slice(0, 48) + '\u2026';
+  }
+  const updateGroupBtn = () => { $('groupBtn').hidden = !/^https:\/\/chat\.whatsapp\.com\//i.test(String(get('ord:group', '') || '').trim()); };
+  async function testBackend(){
+    const url = $('backendUrl').value.trim() || backendUrl();
+    if(!/^https:\/\//i.test(url)){ $('backendMsg').textContent = 'Enter an https:// address first.'; return; }
+    $('backendMsg').textContent = 'Testing\u2026';
+    try {
+      const r = await fetch(url); const j = await r.json();
+      $('backendMsg').textContent = j && j.ok ? 'Connected. The backend is running.' : 'Reached the address, but it is not the order backend.';
+    } catch(e){ $('backendMsg').textContent = 'Could not reach it. Check the address and that it is deployed for "Anyone".'; }
+  }
+
+  // ======== wiring ========
+  $('menuBtn').addEventListener('click', openDrawer);
+  $('drawerClose').addEventListener('click', closeDrawer);
+  $('drawerBackdrop').addEventListener('click', closeDrawer);
+  document.querySelectorAll('.drawer .item[data-go]').forEach(b => b.addEventListener('click', () => {
+    const g = b.dataset.go;
+    if(g === 'new'){
+      closeDrawer();
+      if(view === 'slip' && W && W.isNew) return;
+      if(view === 'slip' && !confirmLeave()) return;
+      openNew();
+    } else navTo(g);
+  }));
+  document.addEventListener('keydown', e => { if(e.key === 'Escape'){ closeDrawer(); if(!$('manual').hidden) $('manual').hidden = true; } });
+
+  document.querySelectorAll('#segPeriod button').forEach(b => b.addEventListener('click', () => { F.p = b.dataset.p; set('ord:f', F); bookLimit = 30; renderBook(); }));
+  document.querySelectorAll('#segScope button').forEach(b => b.addEventListener('click', () => { F.s = b.dataset.s; set('ord:f', F); bookLimit = 30; renderBook(); }));
+  let searchTimer;
+  $('bookSearch').addEventListener('input', () => { clearTimeout(searchTimer); bookLimit = 30; searchTimer = setTimeout(renderBook, 150); });
+  $('bookMore').addEventListener('click', () => { bookLimit += 30; renderBook(); });
+  $('newBtn').addEventListener('click', () => { if(Date.now() < navGuard) return; openNew(); });
+  $('draftResume').addEventListener('click', openNew);
+  $('draftDiscard').addEventListener('click', () => { if(!confirm('Discard this unsaved order?')) return; DRAFT = null; set('ord:draft2', null); renderBook(); });
+
+  $('backBtn').addEventListener('click', leaveToBook);
+  $('sRet').addEventListener('input', e => { W.retailer = e.target.value; slipChanged(); });
+  $('sNotes').addEventListener('input', e => { W.notes = e.target.value; slipChanged(); });
+  $('sShowAmt').addEventListener('change', e => { W.showAmt = e.target.checked; slipChanged(); });
+  $('saveBtn').addEventListener('click', () => saveOrder(false));
+  $('sendBtn').addEventListener('click', primaryAction);
+  $('copyBtn').addEventListener('click', () => copyMessage(false));
+  $('groupBtn').addEventListener('click', () => copyMessage(true));
+  $('reuseBtn').addEventListener('click', reuseAsNew);
+  $('cancelBtn').addEventListener('click', cancelOrder);
+  $('manualSel').addEventListener('click', () => { $('manualText').focus(); $('manualText').select(); });
+  $('manualClose').addEventListener('click', () => { $('manual').hidden = true; });
+
+  $('segR').addEventListener('click', () => { listTab = 'retailers'; renderLists(); });
+  $('segI').addEventListener('click', () => { listTab = 'items'; renderLists(); });
+  $('listSearch').addEventListener('input', renderLists);
+  $('refreshBtn').addEventListener('click', () => { if(isLocal()) toast('No shared list is connected.'); else syncNow({manual:true}); });
+  $('syncPill').addEventListener('click', () => { if(isLocal()) toast('Local mode: orders stay on this phone.'); else syncNow({manual:true}); });
+  $('bulkBtn').addEventListener('click', bulkAdd);
+
+  $('localName').addEventListener('input', e => { set('ord:name', e.target.value); });
+  $('groupLink').addEventListener('input', e => { set('ord:group', e.target.value); updateGroupBtn(); });
+  $('logoutBtn').addEventListener('click', logout);
+  $('backendTest').addEventListener('click', testBackend);
+  $('backendSave').addEventListener('click', () => {
+    const u = $('backendUrl').value.trim();
+    if(u && !/^https:\/\//i.test(u)){ toast('The address must start with https://'); return; }
+    set('ord:backend', u); me = null; set('ord:me', null); set('ord:cursor', 0); master = {v:'', at:0, retailers:[], items:[]}; set('ord:master2', master); rebuild();
+    applyGate(); setPill(); loadSettings(); toast(u ? 'Saved. Enter your access code.' : 'Backend address cleared');
+    if(!isLocal()) $('loginCode').focus();
+  });
+
+  $('exportBtn').addEventListener('click', () => {
+    oAll().then(all => {
+      const data = {v:3, orders:all}; SETTING_KEYS.forEach(k => { data[k] = get(k, null); });
+      const blob = new Blob([JSON.stringify(data)], {type:'application/json'});
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = 'orders-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
+  });
+  $('importBtn').addEventListener('click', () => $('importFile').click());
+  $('importFile').addEventListener('change', e => {
+    const f = e.target.files[0]; if(!f) return;
+    const r = new FileReader();
+    r.onload = async () => {
+      let data;
+      try { data = JSON.parse(r.result); } catch(err){ toast('That file is not a valid backup'); return; }
+      SETTING_KEYS.forEach(k => { if(data[k] !== null && data[k] !== undefined) set(k, data[k]); });
+      const list = Array.isArray(data.orders) ? data.orders : [];
+      for(const o of list){ if(o && o.id && o.no && Array.isArray(o.lines)) await oPut(Object.assign({}, o, {sync:isLocal() ? 'local' : 'pending', rev:(o.rev || 1) + 1})); }
+      location.reload();
+    };
+    r.readAsText(f); e.target.value = '';
+  });
+
+  // ======== install on home screen ========
+  const sessionGet = k => { try { return sessionStorage.getItem(k); } catch(e){ return null; } };
+  let deferredPrompt = null;
+  const standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if(!standalone){
+    window.addEventListener('beforeinstallprompt', e => {
+      e.preventDefault(); deferredPrompt = e; $('installBtn').hidden = false;
+      if(!sessionGet('hideInstall')) $('installBox').hidden = false;
+    });
+    window.addEventListener('appinstalled', () => { $('installBox').hidden = true; toast('App installed'); });
+    if(isIOS && !sessionGet('hideInstall')){
+      $('installText').textContent = 'To install: tap the Share button in Safari, then choose Add to Home Screen.'; $('installBox').hidden = false;
+    }
+  }
+  $('installBtn').addEventListener('click', () => {
+    if(!deferredPrompt) return;
+    deferredPrompt.prompt(); deferredPrompt.userChoice.then(() => { deferredPrompt = null; $('installBox').hidden = true; });
+  });
+  $('installHide').addEventListener('click', () => { $('installBox').hidden = true; try { sessionStorage.setItem('hideInstall', '1'); } catch(e){} });
+  if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
+    window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+  }
+  if(navigator.storage && navigator.storage.persist){ navigator.storage.persist().catch(() => {}); }
+
+  // sync when the app comes back, when the phone is online again, and every couple of minutes while it is open
+  document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') scheduleSync(); });
+  window.addEventListener('online', () => { setPill(); scheduleSync(); });
+  window.addEventListener('offline', setPill);
+  setInterval(() => { if(document.visibilityState === 'visible' && !isLocal() && me && view !== 'slip') syncNow({}); }, 120000);
+  window.addEventListener('pagehide', () => { if(W && W.isNew) persistDraft(); });
+
+  // ======== start ========
+  applyGate();
+  if(!storageOk) $('storageWarn').hidden = false;
+  updateGroupBtn(); setPill(); showView('book');
+  openDB().then(async d => {
+    db = d;
+    await migrateLegacy();
+    await refreshPending();
+    if(view === 'book') renderBook();
+    if(!isLocal() && me) syncNow({});
+  });
+})();
+</script>
+</body>
+</html>
