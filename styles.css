@@ -51,6 +51,7 @@
   .check{display:flex;gap:10px;align-items:center;margin-top:12px;font-size:.95rem}
   .check input{width:20px;height:20px;min-height:0}
   .check label{margin:0;font-weight:400}
+  .rmmsg{min-height:170px}
   .retinfo{display:flex;gap:10px;align-items:center;margin-top:6px;min-height:0}
   .retinfo:empty{display:none}
   .retphone{color:var(--accent);font-weight:500;font-size:.9rem}

@@ -183,6 +183,37 @@
   </section>
 </main>
 
+<!-- ============ PAYMENT REMINDER ============ -->
+<main class="view" id="v-reminder" hidden>
+  <section class="card">
+    <div class="field">
+      <label for="rmRet">Retailer</label>
+      <div class="tawrap">
+        <input id="rmRet" autocomplete="off" autocapitalize="words" placeholder="Search by name or phone" enterkeyhint="next">
+        <div class="talist" id="rmRetList" hidden></div>
+      </div>
+    </div>
+    <div class="field">
+      <label for="rmPhone">Mobile number <small>(+91 is added automatically)</small></label>
+      <input id="rmPhone" type="tel" inputmode="tel" autocomplete="off" placeholder="10-digit mobile number">
+    </div>
+    <div class="field">
+      <label for="rmAmt">Due amount (&#8377;)</label>
+      <input id="rmAmt" inputmode="decimal" autocomplete="off" placeholder="e.g. 12500">
+    </div>
+  </section>
+  <section class="card">
+    <label for="rmMsg">Message <small>(you can edit it)</small></label>
+    <textarea id="rmMsg" class="rmmsg" rows="8"></textarea>
+    <p class="hint" id="rmHint"></p>
+    <div class="actions">
+      <button type="button" class="send" id="rmWa">Open in WhatsApp</button>
+      <button type="button" id="rmCopy">Copy message</button>
+      <button type="button" id="rmReset">Reset message</button>
+    </div>
+  </section>
+</main>
+
 <!-- ============ SETTINGS ============ -->
 <main class="view" id="v-settings" hidden>
   <section class="card">
@@ -250,6 +281,9 @@
     </button>
     <button type="button" class="item" data-go="new">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New order
+    </button>
+    <button type="button" class="item" data-go="reminder">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>Payment reminder
     </button>
     <button type="button" class="item" data-go="lists">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg>Retailers &amp; items
@@ -532,11 +566,11 @@
   }
 
   // ======== views + navigation ========
-  const TITLES = {book:'Order Book', slip:'Order Slip', lists:'Retailers & items', settings:'Settings'};
+  const TITLES = {book:'Order Book', slip:'Order Slip', lists:'Retailers & items', reminder:'Payment reminder', settings:'Settings'};
   let view = 'book', slipPushed = false, skipPop = false;
   function showView(v){
     view = v;
-    ['book', 'slip', 'lists', 'settings'].forEach(n => { $('v-' + n).hidden = n !== v; });
+    ['book', 'slip', 'lists', 'reminder', 'settings'].forEach(n => { $('v-' + n).hidden = n !== v; });
     $('viewTitle').textContent = TITLES[v];
     $('bookBar').hidden = v !== 'book';
     $('slipBar').hidden = !(v === 'slip' && slipEditable());
@@ -545,6 +579,7 @@
     closeDrawer();
     if(v === 'book') renderBook();
     if(v === 'lists') renderLists();
+    if(v === 'reminder') resetReminder();
     if(v === 'settings') loadSettings();
     window.scrollTo(0, 0);
   }
@@ -780,12 +815,13 @@
       else if(shown[0]) onPick(shown[0]);
     });
   }
-  typeahead($('sRet'), $('sRetList'), q => {
+  function retOptions(q){
     if(!q) return (get('ord:recent', []) || []).map(n => rMap.get(key(n))).filter(Boolean);
     const qd = digits(q), byPhone = x => qd && x.digits.includes(qd);
     const starts = R.filter(x => key(x.name).startsWith(q)), rest = R.filter(x => !key(x.name).startsWith(q) && (key(x.name).includes(q) || byPhone(x)));
     return starts.concat(rest);
-  }, x => { W.retailer = x.name; $('sRet').value = x.name; slipChanged(); $('sAdd').focus(); }, false);
+  }
+  typeahead($('sRet'), $('sRetList'), retOptions, x => { W.retailer = x.name; $('sRet').value = x.name; slipChanged(); $('sAdd').focus(); }, false);
   typeahead($('sAdd'), $('sAddList'), q => {
     if(!q) return [];
     const starts = I.filter(x => key(x.name).startsWith(q)), rest = I.filter(x => !key(x.name).startsWith(q) && key(x.name).includes(q));
@@ -1114,6 +1150,44 @@
       $('backendMsg').textContent = j && j.ok ? 'Connected. The backend is running.' : 'Reached the address, but it is not the order backend.';
     } catch(e){ $('backendMsg').textContent = 'Could not reach it. Check the address and that it is deployed for "Anyone".'; }
   }
+
+  // ======== payment reminder ========
+  let rmEdited = false;
+  function waNumber(p){             // sheet numbers have no country code: add +91 to 10-digit numbers
+    let d = digits(p);
+    if(d.length === 11 && d[0] === '0') d = d.slice(1);
+    if(d.length === 10) return '91' + d;
+    return d.length > 10 ? d : '';
+  }
+  function rmBuild(){
+    const name = $('rmRet').value.trim(), amt = num($('rmAmt').value);
+    if(!name || amt <= 0) return '';
+    return ['Namaste ' + name , '', 'Aapka *' + money(amt) + '* ka payment baaki hai. Kripya jaldi se jaldi overdue payment ko clear karayen.', '', 'Dhanyavaad.', curUser().name, 'Garvi Mobile Shop'].join('\n');
+  }
+  function rmRefresh(){
+    if(!rmEdited) $('rmMsg').value = rmBuild();
+    const n = waNumber($('rmPhone').value), has = !!$('rmMsg').value.trim();
+    $('rmWa').disabled = !has; $('rmCopy').disabled = !has;
+    $('rmHint').textContent = n ? 'WhatsApp will open a chat with +' + n.slice(0, 2) + ' ' + n.slice(2) + '.' : 'No valid mobile number: WhatsApp will ask you to choose the contact.';
+  }
+  function resetReminder(){ $('rmRet').value = ''; $('rmPhone').value = ''; $('rmAmt').value = ''; rmEdited = false; rmRefresh(); }
+  typeahead($('rmRet'), $('rmRetList'), retOptions, x => { $('rmRet').value = x.name; $('rmPhone').value = x.phone || ''; rmRefresh(); $('rmAmt').focus(); }, false);
+  $('rmRet').addEventListener('input', () => { const rec = rMap.get(key($('rmRet').value)); if(rec) $('rmPhone').value = rec.phone; rmRefresh(); });
+  $('rmPhone').addEventListener('input', rmRefresh);
+  $('rmAmt').addEventListener('input', rmRefresh);
+  $('rmMsg').addEventListener('input', () => { rmEdited = true; rmRefresh(); });
+  $('rmReset').addEventListener('click', () => { rmEdited = false; rmRefresh(); });
+  $('rmCopy').addEventListener('click', () => {
+    const text = $('rmMsg').value.trim();
+    if(!text || !tapOk('rmcopy')) return;
+    copyText(text).then(() => toast('Message copied'), () => showManual(text));
+  });
+  $('rmWa').addEventListener('click', () => {
+    const text = $('rmMsg').value.trim();
+    if(!text){ toast('Choose a retailer and enter the due amount'); return; }
+    if(!tapOk('rmwa')) return;
+    window.open('https://wa.me/' + waNumber($('rmPhone').value) + '?text=' + encodeURIComponent(text), '_blank', 'noopener');
+  });
 
   // ======== wiring ========
   $('menuBtn').addEventListener('click', openDrawer);
