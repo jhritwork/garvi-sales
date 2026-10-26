@@ -112,7 +112,7 @@
         <input id="sRet" autocomplete="off" autocapitalize="words" placeholder="Search or type retailer name" enterkeyhint="next">
         <div class="talist" id="sRetList" hidden></div>
       </div>
-      <div style="margin-top:6px"><span class="tag" id="sRetNew" hidden>New retailer</span></div>
+      <div class="retinfo"><span class="tag" id="sRetNew" hidden>New retailer</span><a class="retphone" id="sRetPhone" hidden></a></div>
     </div>
 
     <div class="slipsec">
@@ -174,8 +174,8 @@
   <section class="card">
     <details style="border-top:0;padding-top:0;margin-top:0">
       <summary>Add many names on this phone</summary>
-      <div class="field"><label for="bulkRet">Retailers <small>(one per line)</small></label>
-        <textarea id="bulkRet" placeholder="Naresh Garnal store&#10;Sharma Traders"></textarea></div>
+      <div class="field"><label for="bulkRet">Retailers <small>(one per line, phone after a comma or tab is optional)</small></label>
+        <textarea id="bulkRet" placeholder="Naresh Garnal store, 9876543210&#10;Sharma Traders"></textarea></div>
       <div class="field"><label for="bulkItems">Items <small>(one per line, price after a comma or tab is optional)</small></label>
         <textarea id="bulkItems" placeholder="1Ltr, 950&#10;5Ltr, 3202"></textarea></div>
       <div class="actions"><button type="button" class="primary" id="bulkBtn">Add to this phone</button></div>
@@ -347,10 +347,11 @@
   const oPut = o => db ? wait(store('orders', 'readwrite').put(o)) : (ordMem = ordMem.filter(x => x.id !== o.id), ordMem.push(o), Promise.resolve());
   const oGet = id => db ? wait(store('orders', 'readonly').get(id)) : Promise.resolve(ordMem.find(x => x.id === id) || null);
   const oAll = () => db ? wait(store('orders', 'readonly').getAll()).then(a => a || []) : Promise.resolve(ordMem.slice());
+  const retailerPhone = o => { const p = o.retailerPhone || (rMap.get(key(o.retailer)) || {}).phone || ''; return p ? p + ' ' + digits(p) : ''; };
   const oPending = () => db ? wait(store('orders', 'readonly').index('sync').getAll(IDBKeyRange.only('pending'))).then(a => a || []) : Promise.resolve(ordMem.filter(o => o.sync === 'pending'));
   function oQuery(f, limit){
     const match = o => (!f.short || (o.by && o.by.short) === f.short) &&
-      (!f.q || (o.no + ' ' + o.retailer + ' ' + ((o.by && o.by.name) || '') + ' ' + o.status).toLowerCase().includes(f.q));
+      (!f.q || (o.no + ' ' + o.retailer + ' ' + ((o.by && o.by.name) || '') + ' ' + o.status + ' ' + retailerPhone(o)).toLowerCase().includes(f.q));
     const out = {items:[], total:0, sum:0, more:false};
     const take = o => {
       out.total++;
@@ -391,13 +392,18 @@
 
   // ======== master lists + names used on this phone ========
   let master = get('ord:master2', null) || {v:'', at:0, retailers:[], items:[]};
+  if(master.retailers.some(r => typeof r === 'string')) master.v = '';   // cached before phone numbers existed: download the lists again
   let localR = get('ord:lr', []);
   let localI = get('ord:li', []);
   let R = [], I = [], rMap = new Map(), iMap = new Map();
+  const rName = r => typeof r === 'string' ? r : String((r && r.name) || '');
+  const rPhone = r => typeof r === 'string' ? '' : String((r && r.phone) || '');
+  const digits = s => String(s == null ? '' : s).replace(/\D/g, '');
   function rebuild(){
     rMap = new Map(); iMap = new Map();
-    master.retailers.forEach(n => { const k = key(n); if(k && !rMap.has(k)) rMap.set(k, {name:n, local:false}); });
-    localR.forEach(n => { const k = key(n); if(k && !rMap.has(k)) rMap.set(k, {name:n, local:true}); });
+    const addR = (r, local) => { const n = rName(r), k = key(n); if(k && !rMap.has(k)) rMap.set(k, {name:n, phone:rPhone(r), digits:digits(rPhone(r)), local}); };
+    master.retailers.forEach(r => addR(r, false));
+    localR.forEach(r => addR(r, true));
     master.items.forEach(it => { const k = key(it.name); if(k && !iMap.has(k)) iMap.set(k, {name:it.name, price:it.price || '', local:false}); });
     localI.forEach(it => { const k = key(it.name); if(k && !iMap.has(k)) iMap.set(k, {name:it.name, price:it.price || '', local:true}); });
     const cmp = (a, b) => a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'});
@@ -408,7 +414,7 @@
   function rememberNames(o){
     const r = o.retailer.trim();
     if(r){
-      if(!rMap.has(key(r))){ localR.push(r); set('ord:lr', localR); }
+      if(!rMap.has(key(r))){ localR.push({name:r, phone:''}); set('ord:lr', localR); }
       const rec = (get('ord:recent', []) || []).filter(n => key(n) !== key(r)); rec.unshift(r); set('ord:recent', rec.slice(0, 8));
     }
     o.lines.forEach(l => {
@@ -660,7 +666,12 @@
     document.body.classList.toggle('with-bar', !$('bookBar').hidden || !$('slipBar').hidden);
     $('slipHint').textContent = isLocal() ? 'Orders are saved on this phone only.' : 'Saved orders upload to the shared sheet automatically. WhatsApp opens with the message ready.';
   }
-  function updateRetTag(){ const v = W.retailer.trim(); $('sRetNew').hidden = !hasMaster() || !v || rMap.has(key(v)); }
+  function updateRetTag(){
+    const v = W.retailer.trim(), rec = rMap.get(key(v));
+    $('sRetNew').hidden = !hasMaster() || !v || !!rec;
+    const ph = $('sRetPhone'), p = rec ? rec.phone : '';
+    ph.hidden = !p; ph.textContent = p; ph.href = p ? 'tel:' + p.replace(/[^\d+]/g, '') : '';
+  }
   function slipChanged(skipPersist){
     const o = collect(), t = calc(o);
     $('tItems').textContent = t.items; $('tQty').textContent = t.qty; $('tAmt').textContent = money(t.amt);
@@ -738,6 +749,7 @@
         const b = el('button', 'taopt'); b.type = 'button'; b.tabIndex = -1;
         const n = el('span'); n.textContent = x.name; b.appendChild(n);
         if(x.price){ const m = el('span', 'm num'); m.textContent = money(num(x.price)); b.appendChild(m); }
+        else if(x.phone){ const m = el('span', 'm num'); m.textContent = x.phone; b.appendChild(m); }
         else if(x.local){ const m = el('span', 'm'); m.textContent = 'This phone'; b.appendChild(m); }
         b.addEventListener('pointerdown', e => e.preventDefault());
         b.addEventListener('click', () => { hide(); onPick(x); });
@@ -770,7 +782,8 @@
   }
   typeahead($('sRet'), $('sRetList'), q => {
     if(!q) return (get('ord:recent', []) || []).map(n => rMap.get(key(n))).filter(Boolean);
-    const starts = R.filter(x => key(x.name).startsWith(q)), rest = R.filter(x => !key(x.name).startsWith(q) && key(x.name).includes(q));
+    const qd = digits(q), byPhone = x => qd && x.digits.includes(qd);
+    const starts = R.filter(x => key(x.name).startsWith(q)), rest = R.filter(x => !key(x.name).startsWith(q) && (key(x.name).includes(q) || byPhone(x)));
     return starts.concat(rest);
   }, x => { W.retailer = x.name; $('sRet').value = x.name; slipChanged(); $('sAdd').focus(); }, false);
   typeahead($('sAdd'), $('sAddList'), q => {
@@ -872,7 +885,8 @@
     $('segR').classList.toggle('on', listTab === 'retailers'); $('segI').classList.toggle('on', listTab === 'items');
     const q = $('listSearch').value.trim().toLowerCase(), box = $('listBox');
     box.innerHTML = '';
-    const src = listTab === 'retailers' ? R : I, out = src.filter(x => !q || x.name.toLowerCase().includes(q));
+    const qd = digits(q);
+    const src = listTab === 'retailers' ? R : I, out = src.filter(x => !q || x.name.toLowerCase().includes(q) || (listTab === 'retailers' && qd && x.digits.includes(qd)));
     if(!src.length){ const p = el('p', 'empty'); p.textContent = isLocal() ? 'Nothing here yet. Add names below, or they are saved when you save an order.' : 'Nothing here yet. Tap Refresh to download the lists.'; box.appendChild(p); }
     else if(!out.length){ const p = el('p', 'empty'); p.textContent = 'No match.'; box.appendChild(p); }
     out.slice(0, 300).forEach(x => {
@@ -881,12 +895,16 @@
       const nm = el('span', 'nm'); nm.textContent = x.name; main.appendChild(nm);
       const right = el('span', 'meta num');
       if(listTab === 'items' && x.price) right.textContent = money(num(x.price));
+      if(listTab === 'retailers' && x.phone){
+        const a = el('a'); a.textContent = x.phone; a.href = 'tel:' + x.phone.replace(/[^\d+]/g, '');
+        a.addEventListener('click', e => e.stopPropagation()); right.appendChild(a);
+      }
       main.appendChild(right); row.appendChild(main);
       if(x.local){
         const t = el('span', 'tag'); t.textContent = 'This phone'; row.appendChild(t);
         const del = el('button', 'icon'); del.type = 'button'; del.textContent = '\u00D7'; del.setAttribute('aria-label', 'Remove ' + x.name);
         del.addEventListener('click', () => {
-          if(listTab === 'retailers'){ localR = localR.filter(n => key(n) !== key(x.name)); set('ord:lr', localR); }
+          if(listTab === 'retailers'){ localR = localR.filter(n => key(rName(n)) !== key(x.name)); set('ord:lr', localR); }
           else { localI = localI.filter(n => key(n.name) !== key(x.name)); set('ord:li', localI); }
           rebuild(); renderLists();
         });
@@ -903,7 +921,14 @@
   }
   function bulkAdd(){
     let ar = 0, ai = 0;
-    $('bulkRet').value.split('\n').forEach(line => { const r = line.trim(); if(!r || rMap.has(key(r))) return; localR.push(r); rMap.set(key(r), {name:r, local:true}); ar++; });
+    $('bulkRet').value.split('\n').forEach(line => {
+      line = line.trim(); if(!line) return;
+      let name = line, phone = '';
+      const m = line.match(/^(.*?)[\t,]\s*(\+?\d[\d\s-]{5,})\s*$/);
+      if(m){ name = m[1].trim(); phone = m[2].trim(); }
+      if(!name || rMap.has(key(name))) return;
+      localR.push({name, phone}); rMap.set(key(name), {name, phone, digits:digits(phone), local:true}); ar++;
+    });
     $('bulkItems').value.split('\n').forEach(line => {
       line = line.trim(); if(!line) return;
       let name = line, price = '';
@@ -953,9 +978,9 @@
     me = {code, user:res.user, perms:res.perms}; set('ord:me', me);
     const changed = !!(res.lists || (res.accepted && res.accepted.length) || (res.rejected && res.rejected.length) || (res.orders && res.orders.length));
     if(res.lists){
-      master = {v:res.lists.v, at:Date.now(), retailers:res.lists.retailers.map(r => r.name), items:res.lists.items};
+      master = {v:res.lists.v, at:Date.now(), retailers:res.lists.retailers.map(r => ({name:r.name, phone:r.phone || ''})), items:res.lists.items};
       set('ord:master2', master); rebuild();
-      localR = localR.filter(n => { const e = rMap.get(key(n)); return e && e.local; });
+      localR = localR.filter(n => { const e = rMap.get(key(rName(n))); return e && e.local; });
       localI = localI.filter(n => { const e = iMap.get(key(n.name)); return e && e.local; });
       set('ord:lr', localR); set('ord:li', localI); rebuild();
     }
