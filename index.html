@@ -51,7 +51,18 @@
       </button>
       <h1 id="viewTitle">Order Book</h1>
     </div>
-    <button type="button" class="pill" id="syncPill" aria-label="Sync status. Tap to sync now.">Local only</button>
+    <div class="header-actions">
+      <div id="bookTools">
+        <button type="button" class="header-tool" id="searchToggle" aria-label="Search orders" aria-expanded="false" aria-controls="bookSearchRow">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
+        </button>
+        <button type="button" class="header-tool" id="filterOpen" aria-label="Filter orders" aria-haspopup="dialog">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+          <span id="filterCount" class="filter-count" hidden aria-hidden="true"></span>
+        </button>
+      </div>
+      <button type="button" class="pill" id="syncPill" aria-label="Sync status. Tap to sync now.">Local only</button>
+    </div>
   </div>
 </header>
 
@@ -70,21 +81,12 @@
     <div class="actions"><button type="button" class="primary" id="draftResume">Continue</button><button type="button" id="draftDiscard">Discard</button></div>
   </section>
 
-  <section class="card filters">
-    <div class="seg" id="segPeriod" role="group" aria-label="Period">
-      <button type="button" data-p="today">Today</button>
-      <button type="button" data-p="7">7 days</button>
-      <button type="button" data-p="30">30 days</button>
-      <button type="button" data-p="all">All</button>
-    </div>
-    <div class="seg" id="segScope" role="group" aria-label="Whose orders">
-      <button type="button" data-s="mine">My orders</button>
-      <button type="button" data-s="all">Everyone</button>
-    </div>
+  <section class="book-search" id="bookSearchRow" hidden>
     <input id="bookSearch" type="search" placeholder="Search orders" autocomplete="off" aria-label="Search orders">
+    <button type="button" id="searchClose" aria-label="Close and clear search">Close</button>
   </section>
 
-  <div class="summary"><span id="sumCount"></span><span id="sumAmt" class="num"></span></div>
+  <div class="summary" aria-live="polite"><span id="sumCount"></span><span id="bookDateHint"></span><span id="sumAmt" class="num"></span></div>
   <div id="bookList"></div>
   <button type="button" id="bookMore" hidden>Show more</button>
 </main>
@@ -310,6 +312,43 @@
 </div>
 <div class="toast" id="toast" role="status"></div>
 
+<dialog id="filterSheet" class="filter-sheet" aria-labelledby="filterTitle">
+  <form id="filterForm">
+    <div class="filter-head"><h2 id="filterTitle">Filter orders</h2><button type="button" id="filterClose" aria-label="Close filters">Close</button></div>
+    <div class="filter-body">
+      <div class="filter-chips" id="filterChips" aria-label="Applied filters"></div>
+      <button type="button" class="filter-clear" id="filterClear" hidden>Clear all applied filters</button>
+      <div class="field"><label for="filterPeriod">Order creation date</label><select id="filterPeriod">
+        <option value="today">Today</option><option value="yesterday">Yesterday</option>
+        <option value="7">Last 7 days</option><option value="30">Last 30 days</option>
+        <option value="month">This month</option><option value="lastMonth">Last month</option>
+        <option value="all">All time</option><option value="custom">Custom range</option>
+      </select></div>
+      <div id="filterDates" hidden>
+        <div class="field"><label for="filterFrom">From date</label><input type="date" id="filterFrom"></div>
+        <div class="field"><label for="filterTo">To date</label><input type="date" id="filterTo"></div>
+        <p class="hint">Includes both dates in full, using this device's local time.</p>
+      </div>
+      <fieldset class="filter-status"><legend>Order status</legend><div class="filter-chips" id="filterStatuses"></div></fieldset>
+      <div class="field"><label for="filterRetailer">Retailer</label>
+        <input type="search" id="filterRetailer" list="filterRetailers" placeholder="Search or choose a retailer" autocomplete="off">
+        <datalist id="filterRetailers"></datalist><p class="hint">Leave blank for all retailers. Choose an exact retailer name.</p>
+      </div>
+      <div class="field" id="filterScopeField"><label for="filterScope">Whose orders</label><select id="filterScope"></select></div>
+      <div class="field" id="filterSyncField"><label for="filterSync">Upload status</label><select id="filterSync">
+        <option value="">Any upload status</option><option value="pending">Waiting to upload</option>
+        <option value="synced">Saved online</option><option value="failed">Upload failed</option>
+      </select></div>
+      <div class="field"><label for="bookSort">Sort orders</label><select id="bookSort">
+        <option value="newest">Newest first</option><option value="oldest">Oldest first</option>
+        <option value="amountDesc">Amount: high to low</option><option value="amountAsc">Amount: low to high</option>
+      </select></div>
+      <p class="warn" id="filterError" role="alert" hidden></p>
+    </div>
+    <div class="filter-foot"><button type="button" id="filterReset">Reset</button><button type="submit" class="primary">Apply filters</button></div>
+  </form>
+</dialog>
+
 <script>
 (() => {
   'use strict';
@@ -385,28 +424,45 @@
   const oPending = () => db ? wait(store('orders', 'readonly').index('sync').getAll(IDBKeyRange.only('pending'))).then(a => a || []) : Promise.resolve(ordMem.filter(o => o.sync === 'pending'));
   function oQuery(f, limit){
     const match = o => (!f.short || (o.by && o.by.short) === f.short) &&
+      o.createdAt >= f.since && o.createdAt < f.until &&
+      (!f.statuses.length || f.statuses.includes(o.status)) &&
+      (!f.retailer || key(o.retailer) === key(f.retailer)) &&
+      (!f.sync || o.sync === f.sync) &&
       (!f.q || (o.no + ' ' + o.retailer + ' ' + ((o.by && o.by.name) || '') + ' ' + o.status + ' ' + retailerPhone(o)).toLowerCase().includes(f.q));
     const out = {items:[], total:0, sum:0, more:false};
     const take = o => {
       out.total++;
       if(o.status !== 'Cancelled') out.sum += calc(o).amt;
-      if(out.items.length < limit) out.items.push(o); else out.more = true;
+      out.items.push(o);
+    };
+    const finish = () => {
+      out.items.sort((a, b) => {
+        if(f.sort === 'oldest') return a.createdAt - b.createdAt || a.id.localeCompare(b.id);
+        if(f.sort === 'amountAsc' || f.sort === 'amountDesc'){
+          const diff = calc(a).amt - calc(b).amt;
+          if(diff) return f.sort === 'amountAsc' ? diff : -diff;
+        }
+        return b.createdAt - a.createdAt || a.id.localeCompare(b.id);
+      });
+      out.more = out.items.length > limit;
+      out.items = out.items.slice(0, limit);
+      return out;
     };
     if(!db){
-      ordMem.filter(o => o.createdAt >= f.since && match(o)).sort((a, b) => b.createdAt - a.createdAt).forEach(take);
-      return Promise.resolve(out);
+      ordMem.filter(match).forEach(take);
+      return Promise.resolve(finish());
     }
-    return new Promise(res => {
-      const range = f.since > 0 ? IDBKeyRange.lowerBound(f.since) : null;
+    return new Promise((res, reject) => {
+      const range = Number.isFinite(f.until) ? IDBKeyRange.bound(f.since, f.until, false, true) :
+        (f.since > 0 ? IDBKeyRange.lowerBound(f.since) : null);
       const req = store('orders', 'readonly').index('createdAt').openCursor(range, 'prev');
-      let seen = 0;
       req.onsuccess = () => {
         const c = req.result;
-        if(!c || ++seen > 6000){ res(out); return; }
+        if(!c){ res(finish()); return; }
         if(match(c.value)) take(c.value);
         c.continue();
       };
-      req.onerror = () => res(out);
+      req.onerror = () => reject(req.error);
     });
   }
   async function migrateLegacy(){
@@ -573,6 +629,7 @@
     ['book', 'slip', 'lists', 'reminder', 'settings'].forEach(n => { $('v-' + n).hidden = n !== v; });
     $('viewTitle').textContent = TITLES[v];
     $('bookBar').hidden = v !== 'book';
+    $('bookTools').hidden = v !== 'book';
     $('slipBar').hidden = !(v === 'slip' && slipEditable());
     document.body.classList.toggle('with-bar', !$('bookBar').hidden || !$('slipBar').hidden);
     document.querySelectorAll('.drawer .item[data-go]').forEach(b => b.classList.toggle('on', b.dataset.go === v));
@@ -623,22 +680,146 @@
   });
 
   // ======== order book ========
-  const F = Object.assign({p:'today', s:'all'}, get('ord:f', {}) || {});
+  const FILTER_DEFAULTS = {p:'today', s:'all', from:'', to:'', statuses:[], retailer:'', sync:'', sort:'newest'};
+  const FILTER_STATUSES = ['Saved', 'Sent', 'Edited', 'Cancelled', ...OWNER_STATUSES];
+  const F = Object.assign({}, FILTER_DEFAULTS, get('ord:f', {}) || {});
+  if(!Array.isArray(F.statuses)) F.statuses = [];
+  F.statuses = F.statuses.filter(s => FILTER_STATUSES.includes(s));
+  if(!Array.from($('filterPeriod').options).some(o => o.value === F.p)) F.p = 'today';
+  if(!Array.from($('bookSort').options).some(o => o.value === F.sort)) F.sort = 'newest';
+  const dateValue = d => [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
+  function parseDate(value){
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    const d = new Date(value + 'T00:00:00');
+    return Number.isFinite(d.getTime()) && dateValue(d) === value ? d : null;
+  }
+  if(F.p === 'custom' && (!parseDate(F.from) || !parseDate(F.to) || F.from > F.to)) F.p = 'today';
   let bookLimit = 30, bookToken = 0;
-  function periodStart(){
-    if(F.p === 'today') return startOfDay();
-    if(F.p === '7') return startOfDay() - 6 * 86400000;
-    if(F.p === '30') return startOfDay() - 29 * 86400000;
-    return 0;
+  function periodRange(f){
+    const today = new Date(startOfDay());
+    const shift = n => new Date(today.getFullYear(), today.getMonth(), today.getDate() + n).getTime();
+    if(f.p === 'today') return {since:shift(0), until:shift(1)};
+    if(f.p === 'yesterday') return {since:shift(-1), until:shift(0)};
+    if(f.p === '7' || f.p === '30') return {since:shift(1 - Number(f.p)), until:shift(1)};
+    if(f.p === 'month') return {since:new Date(today.getFullYear(), today.getMonth(), 1).getTime(), until:new Date(today.getFullYear(), today.getMonth() + 1, 1).getTime()};
+    if(f.p === 'lastMonth') return {since:new Date(today.getFullYear(), today.getMonth() - 1, 1).getTime(), until:new Date(today.getFullYear(), today.getMonth(), 1).getTime()};
+    if(f.p === 'custom'){
+      const end = parseDate(f.to);
+      end.setDate(end.getDate() + 1);
+      return {since:parseDate(f.from).getTime(), until:end.getTime()};
+    }
+    return {since:0, until:Infinity};
+  }
+  function saveFilters(){
+    set('ord:f', F); bookLimit = 30; renderBook();
+  }
+  function clearFilters(){
+    if($('filterSheet').open) $('filterSheet').close();
+    Object.assign(F, FILTER_DEFAULTS, {p:'all', statuses:[]});
+    setSearchOpen(false); saveFilters();
+  }
+  function setSearchOpen(open){
+    $('bookSearchRow').hidden = !open;
+    $('searchToggle').setAttribute('aria-expanded', String(open));
+    if(open) $('bookSearch').focus();
+    else {
+      $('bookSearch').value = '';
+      $('searchToggle').focus();
+    }
+  }
+  function activeFilters(){
+    const chips = [];
+    if(F.p !== 'all') chips.push({label:F.p === 'custom' ? fmtDate(parseDate(F.from)) + ' - ' + fmtDate(parseDate(F.to)) : Array.from($('filterPeriod').options).find(o => o.value === F.p).textContent, remove:() => { F.p = 'all'; F.from = F.to = ''; }});
+    if(F.statuses.length) chips.push({label:'Status: ' + F.statuses.join(', '), remove:() => { F.statuses = []; }});
+    if(F.retailer) chips.push({label:'Retailer: ' + F.retailer, remove:() => { F.retailer = ''; }});
+    if(curPerms().seeAll && F.s !== 'all') chips.push({label:F.s === 'mine' ? 'My orders' : 'Salesman: ' + (F.salesmanName || F.s), remove:() => { F.s = 'all'; }});
+    if(!isLocal() && F.sync) chips.push({label:'Upload: ' + ({pending:'Waiting to upload', synced:'Saved online', failed:'Upload failed'}[F.sync] || F.sync), remove:() => { F.sync = ''; }});
+    return chips;
+  }
+  let filterRetailerNames = [];
+  async function openFilters(){
+    const button = $('filterOpen');
+    button.disabled = true;
+    let orders;
+    try {
+      orders = db ? await new Promise((resolve, reject) => {
+        const req = store('orders', 'readonly').getAll();
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      }) : await oAll();
+    }
+    catch(e){ toast('Could not load filter options. Please try again.'); return; }
+    finally { button.disabled = false; }
+    const perms = curPerms();
+    const visible = orders.filter(o => perms.seeAll || (o.by && o.by.short) === curUser().short);
+    filterRetailerNames = Array.from(new Set([...R.map(r => r.name), ...visible.map(o => o.retailer), F.retailer].filter(Boolean))).sort((a, b) => a.localeCompare(b));
+    $('filterRetailers').replaceChildren(...filterRetailerNames.map(name => { const o = el('option'); o.value = name; return o; }));
+    const salesmen = new Map();
+    visible.forEach(o => { if(o.by && o.by.short) salesmen.set(o.by.short, o.by.name || o.by.short); });
+    if(!['all', 'mine'].includes(F.s)) salesmen.set(F.s, F.salesmanName || salesmen.get(F.s) || F.s);
+    const scopes = [['all', 'Everyone'], ['mine', 'My orders'], ...Array.from(salesmen).sort((a, b) => a[1].localeCompare(b[1]))];
+    $('filterScope').replaceChildren(...scopes.map(([value, name]) => { const o = el('option'); o.value = value; o.textContent = name; return o; }));
+    $('filterScopeField').hidden = !perms.seeAll;
+    $('filterSyncField').hidden = isLocal();
+    $('filterPeriod').value = F.p;
+    $('filterFrom').value = F.from || dateValue(new Date());
+    $('filterTo').value = F.to || dateValue(new Date());
+    $('filterRetailer').value = F.retailer;
+    $('filterScope').value = perms.seeAll ? F.s : 'mine';
+    $('filterSync').value = F.sync;
+    $('bookSort').value = F.sort;
+    document.querySelectorAll('#filterStatuses input').forEach(input => { input.checked = F.statuses.includes(input.value); });
+    updateFilterDates();
+    $('filterError').hidden = true;
+    $('filterSheet').showModal();
+  }
+  function updateFilterDates(){
+    const custom = $('filterPeriod').value === 'custom';
+    $('filterDates').hidden = !custom;
+    $('filterFrom').required = $('filterTo').required = custom;
+    $('filterFrom').disabled = $('filterTo').disabled = !custom;
+  }
+  function applyFilters(e){
+    e.preventDefault();
+    const p = $('filterPeriod').value, from = $('filterFrom').value, to = $('filterTo').value;
+    const retailer = $('filterRetailer').value.trim();
+    let error = '';
+    if(p === 'custom' && (!parseDate(from) || !parseDate(to))) error = 'Choose a valid From date and To date.';
+    else if(p === 'custom' && from > to) error = 'From date must be on or before To date.';
+    else if(retailer && !filterRetailerNames.some(name => key(name) === key(retailer))) error = 'Choose an exact retailer name from the suggestions, or leave it blank.';
+    if(error){
+      $('filterError').textContent = error; $('filterError').hidden = false;
+      (error.startsWith('Choose an exact') ? $('filterRetailer') : $('filterFrom')).focus();
+      return;
+    }
+    Object.assign(F, {p, from:p === 'custom' ? from : '', to:p === 'custom' ? to : '',
+      statuses:Array.from(document.querySelectorAll('#filterStatuses input:checked'), input => input.value),
+      retailer:filterRetailerNames.find(name => key(name) === key(retailer)) || '',
+      s:curPerms().seeAll ? $('filterScope').value : F.s,
+      salesmanName:$('filterScope').selectedOptions[0].textContent,
+      sync:isLocal() ? '' : $('filterSync').value, sort:$('bookSort').value});
+    $('filterSheet').close(); saveFilters();
   }
   const syncIcon = o => o.sync === 'synced' ? ['\u2713 saved online', 'Saved online'] : o.sync === 'pending' ? ['\u21BB waiting', 'Waiting to upload'] : o.sync === 'failed' ? ['\u26A0 not saved', o.syncError || 'Upload failed'] : ['', ''];
   async function renderBook(){
     const token = ++bookToken;
     const perms = curPerms();
-    const scope = perms.seeAll ? F.s : 'mine';          // never overwrite the saved choice: permissions can change after login
-    $('segScope').hidden = !perms.seeAll;
-    document.querySelectorAll('#segPeriod button').forEach(b => b.classList.toggle('on', b.dataset.p === F.p));
-    document.querySelectorAll('#segScope button').forEach(b => b.classList.toggle('on', b.dataset.s === scope));
+    const scope = perms.seeAll ? F.s : 'mine';
+    const chips = activeFilters();
+    $('filterCount').textContent = chips.length;
+    $('filterCount').hidden = !chips.length;
+    $('filterOpen').setAttribute('aria-label', 'Filter orders' + (chips.length ? ', ' + chips.length + ' active' : ''));
+    $('filterChips').replaceChildren(...chips.map(chip => {
+      const b = el('button', 'filter-chip'); b.type = 'button'; b.textContent = chip.label + ' \u00D7';
+      b.setAttribute('aria-label', 'Remove filter: ' + chip.label);
+      b.addEventListener('click', () => { chip.remove(); $('filterSheet').close(); saveFilters(); }); return b;
+    }));
+    $('filterClear').hidden = !chips.length && !$('bookSearch').value;
+    $('bookDateHint').textContent = F.p === 'custom' ?
+      fmtDate(parseDate(F.from)) + ' - ' + fmtDate(parseDate(F.to)) :
+      Array.from($('filterPeriod').options).find(o => o.value === F.p).textContent;
+    $('bookDateHint').title = $('bookDateHint').textContent;
+    $('filterOpen').title = 'Filters: ' + $('bookDateHint').textContent;
 
     const draftOk = DRAFT && hasContent(DRAFT);
     $('draftCard').hidden = !draftOk;
@@ -646,7 +827,17 @@
       $('draftNo').textContent = DRAFT.no;
       $('draftText').textContent = (DRAFT.retailer.trim() || 'No retailer yet') + ' \u00B7 ' + DRAFT.lines.length + (DRAFT.lines.length === 1 ? ' item' : ' items');
     }
-    const r = await oQuery({since:periodStart(), short:scope === 'mine' ? curUser().short : '', q:$('bookSearch').value.trim().toLowerCase()}, bookLimit);
+    let r;
+    try {
+      r = await oQuery({...periodRange(F), short:scope === 'mine' ? curUser().short : scope === 'all' ? '' : scope,
+        statuses:F.statuses, retailer:F.retailer, sync:isLocal() ? '' : F.sync, sort:F.sort,
+        q:$('bookSearch').value.trim().toLowerCase()}, bookLimit);
+    } catch(e){
+      if(token !== bookToken) return;
+      $('bookList').textContent = 'Could not load orders. Please try again.';
+      $('sumCount').textContent = ''; $('sumAmt').textContent = ''; $('bookMore').hidden = true;
+      toast('Could not load orders. Please try again.'); return;
+    }
     if(token !== bookToken) return;
     const box = $('bookList'); box.innerHTML = '';
     $('sumCount').textContent = r.total + (r.total === 1 ? ' order' : ' orders');
@@ -655,6 +846,10 @@
       const p = el('p', 'empty');
       p.textContent = $('bookSearch').value.trim() ? 'No matching orders.' : (F.p === 'today' ? 'No orders today yet. Tap + New order to start.' : 'No orders in this period.');
       box.appendChild(p);
+      if(chips.length || $('bookSearch').value.trim()){
+        const clear = el('button'); clear.type = 'button'; clear.textContent = 'Clear filters';
+        clear.addEventListener('click', clearFilters); box.appendChild(clear);
+      }
     }
     r.items.forEach(o => {
       const b = el('button', 'orow'); b.type = 'button';
@@ -662,7 +857,7 @@
       const st = el('span', 'badge st-' + o.status); st.textContent = o.status;
       o1.append(no, st);
       const o2 = el('div', 'o2'); o2.textContent = o.retailer;
-      const o3 = el('div', 'o3'); o3.textContent = fmtDT(o.createdAt) + (scope === 'all' && o.by ? ' \u00B7 ' + o.by.name : '');
+      const o3 = el('div', 'o3'); o3.textContent = fmtDT(o.createdAt) + (scope !== 'mine' && o.by ? ' \u00B7 ' + o.by.name : '');
       const t = calc(o);
       const amt = el('div', 'oamt num' + (o.status === 'Cancelled' ? ' cx' : '')); amt.textContent = t.amt > 0 ? money(t.amt) : '\u2013';
       const ic = syncIcon(o);
@@ -1205,8 +1400,29 @@
   }));
   document.addEventListener('keydown', e => { if(e.key === 'Escape'){ closeDrawer(); if(!$('manual').hidden) $('manual').hidden = true; } });
 
-  document.querySelectorAll('#segPeriod button').forEach(b => b.addEventListener('click', () => { F.p = b.dataset.p; set('ord:f', F); bookLimit = 30; renderBook(); }));
-  document.querySelectorAll('#segScope button').forEach(b => b.addEventListener('click', () => { F.s = b.dataset.s; set('ord:f', F); bookLimit = 30; renderBook(); }));
+  FILTER_STATUSES.forEach(status => {
+    const label = el('label', 'status-choice'), input = el('input'), text = el('span');
+    input.type = 'checkbox'; input.value = status; text.textContent = status;
+    label.append(input, text); $('filterStatuses').appendChild(label);
+  });
+  $('filterOpen').addEventListener('click', () => openFilters());
+  $('searchToggle').addEventListener('click', () => {
+    const open = $('bookSearchRow').hidden;
+    setSearchOpen(open);
+    if(!open) saveFilters();
+  });
+  $('searchClose').addEventListener('click', () => { setSearchOpen(false); saveFilters(); });
+  $('filterClose').addEventListener('click', () => $('filterSheet').close());
+  $('filterSheet').addEventListener('click', e => { if(e.target === $('filterSheet')) $('filterSheet').close(); });
+  $('filterPeriod').addEventListener('change', updateFilterDates);
+  $('filterForm').addEventListener('submit', applyFilters);
+  $('filterClear').addEventListener('click', clearFilters);
+  $('filterReset').addEventListener('click', () => {
+    $('filterPeriod').value = 'all'; $('filterRetailer').value = ''; $('filterScope').value = 'all'; $('filterSync').value = '';
+    $('bookSort').value = 'newest';
+    document.querySelectorAll('#filterStatuses input').forEach(input => { input.checked = false; });
+    $('filterError').hidden = true; updateFilterDates();
+  });
   let searchTimer;
   $('bookSearch').addEventListener('input', () => { clearTimeout(searchTimer); bookLimit = 30; searchTimer = setTimeout(renderBook, 150); });
   $('bookMore').addEventListener('click', () => { bookLimit += 30; renderBook(); });
